@@ -68,7 +68,7 @@ data Form (req :: Nat) (ext :: Nat) where
 -- ── Universe ──────────────────────────────────────────────────────────────────
 
 univ :: [E]
-univ = [1..100]
+univ = [1 .. 100]
 
 -- ── State ─────────────────────────────────────────────────────────────────────
 
@@ -103,7 +103,7 @@ complement :: State n -> State n
 complement (State f) = State (not . f)
 
 merge :: forall m n. KnownNat n => State m -> State n -> State (m + n)
-merge (State f) (State g) = State \e -> f (drop (natInt @n) e) && g e
+merge (State f) (State g) = State \e -> extendBy (natInt @n) f e && g e
 
 -- ── Lattice ───────────────────────────────────────────────────────────────────
 --
@@ -181,9 +181,9 @@ ex = And s0 s1
 ey :: Form 2 2
 ey = And s1 s0
 
--- | Dekker theorem: evalDPL phi s = s /\ evalStatic phi
+-- | Dekker theorem: evalDPL phi s = s `merge` evalStatic phi
 test :: Bool
-test = sat (initState /\ evalStatic ex) == sat (evalDPL ex initState)
+test = sat (initState `merge` evalStatic ex) == sat (evalDPL ex initState)
 
 -- Compile-time rejection (uncomment to verify):
 -- bad = evalDPL ey initState   -- No instance for (2 <= 0)

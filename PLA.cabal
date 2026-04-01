@@ -21,7 +21,7 @@ common defaults
     TypeOperators
 
   build-depends:
-    base ^>= 4.18.3.0,
+    base ^>=4.18.3.0,
     containers,
 
   default-language: Haskell2010
@@ -30,16 +30,22 @@ executable EDPL
   import: defaults
   hs-source-dirs: src
   main-is: EDPL.hs
-  ghc-options: -main-is EDPL
+  ghc-options:
+    -main-is
+    EDPL
 
 executable PLA
   import: defaults
   hs-source-dirs: src
   main-is: PLA.hs
-  ghc-options: -main-is PLA
+  ghc-options:
+    -main-is
+    PLA
 
 executable PLASafe
   import: defaults
   hs-source-dirs: src
   main-is: PLASafe.hs
-  ghc-options: -main-is PLASafe
+  ghc-options:
+    -main-is
+    PLASafe

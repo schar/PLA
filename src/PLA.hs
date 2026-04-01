@@ -106,7 +106,7 @@ resolve e = map \(Var i) -> e !! i
 
 -- Evaluation
 
--- | Dekker's dynamic merge (Observation 15).
+-- | Dekker's (2002) dynamic merge (Observation 15).
 merge :: State Stack -> State Stack -> State Stack
 merge (State m f) (State n g) = State (m + n) \e -> f (drop n e) && g e
 
@@ -138,9 +138,9 @@ s1 = Not (And Ex (Rel gt [Var 0, Var 2]))
 ex = And s0 s1
 ey = And s1 s0
 
--- | Test the Dekker theorem: evalDPL φ initState ≡ initState /\ evalStatic φ
+-- | Test the Dekker theorem: evalDPL φ initState ≡ initState `merge` evalStatic φ
 test :: Bool
-test = sat (initState /\ evalStatic ex) == sat (evalDPL ex initState)
+test = sat (initState `merge` evalStatic ex) == sat (evalDPL ex initState)
 
 main :: IO ()
 main = print test
