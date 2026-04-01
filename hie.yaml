@@ -1,0 +1,10 @@
+cradle:
+  multi:
+    - path: "./ignore"
+      config:
+        cradle:
+          none:
+    - path: "./"
+      config:
+        cradle:
+          cabal:
