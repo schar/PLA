@@ -1,4 +1,4 @@
-module PLA where
+module PLAMin where
 
 import Control.Monad (replicateM)
 
@@ -8,123 +8,95 @@ type E = Int
 
 type Stack = [E]
 
-newtype Var = Var
-  {getVar :: Int}
+newtype Var = Var {getVar :: Int}
   deriving (Eq, Ord)
 
--- | Information state: domain size and characteristic function.
-data State a = State
-  { dom :: Int,
-    stack :: a -> Bool
-  }
+-- | Information aggregate: domain and an info state over that domain.
+data Aggregate d i = State {dom :: d, info :: i}
+  deriving Functor
 
+type State = Aggregate Int (Stack -> Bool)
+
+-- | Variable-free first-order formulas with random assignment.
 data Form
   = Rel ([E] -> Bool) [Var]
   | Ex
   | Not Form
   | And Form Form
 
--- Universe
-
+-- | Universe of discourse.
 univ :: [E]
 univ = [1 .. 100]
 
 -- States and operations
 
--- | Add a referent (prepend an unconstrained position).
-addRef :: State Stack -> State Stack
-addRef (State n f) = State (n + 1) (f . tail)
-
--- | Delete the newest referent (existentially project the first position).
-delRef :: State Stack -> State Stack
-delRef (State n f) = State (n - 1) \e -> any (\d -> f (d : e)) univ
-
-
-top :: Int -> State a
+-- | Tautologous state of length @n@.
+top :: Int -> State
 top n = State n (const True)
 
--- | Contradictory state.
-bottom :: Int -> State a
-bottom n = State n (const False)
+-- | Empty/initial state.
+initState :: State
+initState = top 0
 
--- | Empty context.
-initState :: State a
-initState = State 0 (const True)
+-- | Stack predicate conjunction.
+(@@) :: (Stack -> Bool) -> (Stack -> Bool) -> Stack -> Bool
+f @@ g = \e -> f e && g e
 
--- | Extend to a larger domain.
-extend :: State Stack -> Int -> State Stack
-extend s k
-  | dom s <= k = iterate addRef s !! (k - dom s)
-  | otherwise  = error "extend: target smaller than source"
+-- | Extend to a larger domain: @k@ new leading positions are unconstrained,
+--   so we simply drop them before applying the original function.
+extendBy :: Int -> State -> State
+extendBy k (State n f)
+  | k >= 0 = State (n + k) (f . drop k)
+  | otherwise = error "impossible extendBy; this shouldn't happen"
+  -- == (`merge` top k)
 
--- | Restrict to a smaller domain.
-restrict :: State Stack -> Int -> State Stack
-restrict s k
-  | k <= dom s = iterate delRef s !! (dom s - k)
-  | otherwise   = error "restrict: target larger than source"
+-- | Restrict to a smaller domain: existentially quantify over @k@ positions.
+projectBy :: Int -> State -> State
+projectBy k (State n f)
+  | k <= n = State (n - k) (\e -> any (\e' -> f (e' ++ e)) (replicateM k univ))
+  | otherwise = error "impossible projectBy; this shouldn't happen"
+
+-- | State merge
+merge :: State -> State -> State
+merge (State m f) (State n g) = State (m + n) ((f . drop n) @@ g)
 
 -- | State difference.
-(\\) :: State Stack -> State Stack -> State Stack
-State n f \\ t =
-  let g = stack (restrict t n)
-   in State n \e -> f e && not (g e)
+(\\) :: State -> State -> State
+s \\ t = State (dom s) (info s @@ info (complement tX))
+  where
+    tX = projectBy (dom t - dom s) t
 
 -- | Complement: negate the characteristic function. Involutive.
-complement :: State a -> State a
-complement (State n f) = State n (not . f)
-
--- Lattice (right-aligned identity linking)
-
-class Lattice a where
-  (\/) :: a -> a -> a -- join
-  (/\) :: a -> a -> a -- meet
-
-instance Lattice (State Stack) where
-  -- Meet: extend both to max domain, intersect
-  s /\ t =
-    let k = max (dom s) (dom t)
-        f = stack (extend s k)
-        g = stack (extend t k)
-    in State k \e -> f e && g e
-
-  -- Join: restrict both to min domain, union
-  s \/ t =
-    let k = min (dom s) (dom t)
-        f = stack (restrict s k)
-        g = stack (restrict t k)
-    in State k \e -> f e || g e
+complement :: State -> State
+complement = fmap (not .)
 
 -- Materialization
 
 -- | Enumerate all satisfying stacks.
-sat :: State Stack -> [Stack]
+sat :: State -> [Stack]
 sat (State n f) = filter f (replicateM n univ)
 
 -- | Resolve variables against a stack.
-resolve :: Stack -> [Var] -> [E]
-resolve e = map \(Var i) -> e !! i
+resolve :: [Var] -> Stack -> [E]
+resolve vs e = map (\(Var i) -> e !! i) vs
 
 -- Evaluation
 
--- | Dekker's (2002) dynamic merge (Observation 15).
-merge :: State Stack -> State Stack -> State Stack
-merge (State m f) (State n g) = State (m + n) \e -> f (drop n e) && g e
-
 -- | Static content of a formula.
-evalStatic :: Form -> State Stack
-evalStatic (Rel r vs) = State 0 \e -> r (resolve e vs)
+evalStatic :: Form -> State
+evalStatic (Rel r vs) = State 0 (r . resolve vs)
 evalStatic Ex = top 1
-evalStatic (Not p) = complement (restrict (evalStatic p) 0)
+evalStatic (Not p) = let s = evalStatic p in complement (projectBy (dom s) s)
 evalStatic (And p q) = merge (evalStatic p) (evalStatic q)
 
 -- | Dynamic evaluation: update an state with a formula.
-evalDPL :: Form -> State Stack -> State Stack
-evalDPL (Rel r vs) (State n f) = State n \e -> f e && r (resolve e vs)
-evalDPL Ex s = addRef s
+evalDPL :: Form -> State -> State
+evalDPL (Rel r vs) (State n f) = State n (f @@ (r . resolve vs))
+evalDPL Ex s = extendBy 1 s
 evalDPL (Not p) s = s \\ evalDPL p s
 evalDPL (And p q) s = evalDPL q (evalDPL p s)
 
--- Dekker 1996: evalDPL φ s ≡ s /\ evalStatic φ
+-- Dekker 1996: evalDPL φ s ≡ s `merge` evalStatic φ
 
 -- Examples
 
