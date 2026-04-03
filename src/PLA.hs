@@ -1,4 +1,4 @@
-module PLAMin where
+module PLA where
 
 import Control.Monad (replicateM)
 
