@@ -12,10 +12,7 @@ newtype Var = Var {getVar :: Int}
   deriving (Eq, Ord)
 
 -- | Information aggregate: domain and an info state over that domain.
-data Aggregate d i = State {dom :: d, info :: i}
-  deriving Functor
-
-type State = Aggregate Int (Stack -> Bool)
+data State = State {dom :: Int, info :: Stack -> Bool}
 
 -- | Variable-free first-order formulas with random assignment.
 data Form
@@ -38,9 +35,11 @@ top n = State n (const True)
 initState :: State
 initState = top 0
 
--- | Stack predicate conjunction.
-(@@) :: (Stack -> Bool) -> (Stack -> Bool) -> Stack -> Bool
-f @@ g = \e -> f e && g e
+-- | State intersection, same domains.
+(@@) :: State -> State -> State
+State m f @@ State n g
+  | m == n = State m (\e -> f e && g e)
+  | otherwise = error "mismatched @@ domains; this shouldn't happen"
 
 -- | Extend to a larger domain: @k@ new leading positions are unconstrained,
 --   so we simply drop them before applying the original function.
@@ -48,7 +47,7 @@ extendBy :: Int -> State -> State
 extendBy k (State n f)
   | k >= 0 = State (n + k) (f . drop k)
   | otherwise = error "impossible extendBy; this shouldn't happen"
-  -- == (`merge` top k)
+-- == (`merge` top k)
 
 -- | Restrict to a smaller domain: existentially quantify over @k@ positions.
 projectBy :: Int -> State -> State
@@ -58,17 +57,15 @@ projectBy k (State n f)
 
 -- | State merge
 merge :: State -> State -> State
-merge (State m f) (State n g) = State (m + n) ((f . drop n) @@ g)
-
--- | State difference.
-(\\) :: State -> State -> State
-s \\ t = State (dom s) (info s @@ info (complement tX))
-  where
-    tX = projectBy (dom t - dom s) t
+merge (State m f) (State n g) = State (m + n) (\e -> f (drop n e) && g e)
 
 -- | Complement: negate the characteristic function. Involutive.
 complement :: State -> State
-complement = fmap (not .)
+complement (State n f) = State n (not . f)
+
+-- | State difference.
+(\\) :: State -> State -> State
+s \\ t = s @@ complement (projectBy (dom t - dom s) t)
 
 -- Materialization
 
@@ -91,7 +88,7 @@ evalStatic (And p q) = merge (evalStatic p) (evalStatic q)
 
 -- | Dynamic evaluation: update an state with a formula.
 evalDPL :: Form -> State -> State
-evalDPL (Rel r vs) (State n f) = State n (f @@ (r . resolve vs))
+evalDPL (Rel r vs) s = s @@ State (dom s) (r . resolve vs)
 evalDPL Ex s = extendBy 1 s
 evalDPL (Not p) s = s \\ evalDPL p s
 evalDPL (And p q) s = evalDPL q (evalDPL p s)
