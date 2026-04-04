@@ -11,17 +11,18 @@ Three perspectives:
 common domain. Ill-formed updates rejected at runtime. Natural lattice structure
 on states.
 - **PLA** — Stack-based (de Bruijn) assignments. States are predicates of stacks
-tagged with their common length. Ill-formed updates rejected at runtime. States
-form a lattice, but not a terribly useful or intuitive one.
+tagged with their common length. Ill-formed updates rejected at runtime.
 - **PLASafe** — Stack-based assignments with type-level domain and extension
-indices, enforcing well-formedness at compile time. Another weird lattice
-structure.
+indices, ensuring well-formedness at compile time.
 
-Each system provides static and dynamic interpretations. These are equivalent in
-the PLA fragments and Strawson-equivalent in the EDPL fragment (`evalStatic` is
-total, but `evalDPL` is not).
+Each system provides static and dynamic interpretation functions. These are
+equivalent in the PLA fragments and Strawson-equivalent in the EDPL fragment
+(`evalStatic` is total, but `evalDPL` is not).
 
 ## Build & run
+
+The `.cabal` file requires [GHC `9.6.7`](https://www.haskell.org/ghcup/), but
+works up to `9.14.1`.
 
 ```bash
 cabal build all
@@ -31,6 +32,3 @@ cabal run EDPL # or: PLA / PLASafe
 ```bash
 cabal repl EDPL # or: PLA / PLASafe
 ```
-
-The `.cabal` file requires [GHC `9.6.7`](https://www.haskell.org/ghcup/), but
-works up to `9.14.1`.
