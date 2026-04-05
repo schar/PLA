@@ -7,86 +7,71 @@ import qualified Data.Set as S
 
 -- Basic data and types
 
+type E = Int
+
+-- | Universe of discourse.
+univ :: [E]
+univ = [1 .. 100]
+
 data Var = W | X | Y | Z
   deriving (Eq, Bounded, Ord, Enum, Show)
 
 vars :: [Var]
 vars = [minBound ..]
 
-type E = Int
-
-univ :: [E]
-univ = [1 .. 100]
-
 -- | Partial assignments as maps
 type G = M.Map Var E
+
+-- States and operations on states
+
+-- | A State is a domain and a set of partial assignments over that domain
+data State = State {dom :: Domain, info :: S.Set G}
+  deriving (Show, Eq)
 
 -- | Domains are sets of variables
 type Domain = S.Set Var
 
--- | A State is a domain and a set of partial assignments over that domain
-type State = (Domain, S.Set G)
-
--- States and operations on states
-
 -- | Add a referent to a state
 addRef :: State -> Var -> State
-addRef (dom, s) v =
-  ( S.insert v dom,
-    S.fromList
-      [ M.insert v x g
-        | g <- S.toList s,
-          x <- univ
-      ]
-  )
+addRef (State d s) v =
+  State
+    (S.insert v d)
+    (S.fromList [M.insert v x g | g <- S.toList s, x <- univ])
 
 -- | Delete a referent from a state
 delRef :: State -> Var -> State
-delRef (dom, s) v =
-  ( S.delete v dom,
-    S.map (M.delete v) s
-  )
+delRef (State d s) v =
+  State
+    (S.delete v d)
+    (S.map (M.delete v) s)
 
--- | Generate a minimal state given a domain
-stateFromDomain :: Domain -> State
-stateFromDomain = foldl' addRef initState
-
--- | Restrict a state to a smaller domain
-restrict :: State -> Domain -> State
-restrict (domT, t) target
-  | target `S.isSubsetOf` domT =
-      let diff = domT S.\\ target
-       in foldl' delRef (domT, t) diff
-  -- (target, S.map (`M.restrictKeys` target) t)
-  | otherwise = error "restrict: this shouldn't happen"
-
--- | Extend a state to a larger domain
-extend :: State -> Domain -> State
-extend (domS, s) target
-  | domS `S.isSubsetOf` target =
-      let diff = target S.\\ domS
-       in foldl' addRef (domS, s) diff
-  | otherwise = error "extend: this shouldn't happen"
-
--- | Subtract two states by restricting the second to the domain of the first
-(\\) :: State -> State -> State
-(domS, s) \\ t = (domS, s S.\\ snd (restrict t domS))
-
--- | State complementation; involutive
-complement :: State -> State
-complement s@(domS, _) = stateFromDomain domS \\ s
-
--- | Alias for a minimal state over a domain
+-- | Tautologous state over a domain
 top :: Domain -> State
-top = stateFromDomain
+top = foldl' addRef initState
 
 -- | Maximal/contradictory state over a domain
 bottom :: Domain -> State
-bottom dom = (dom, S.empty)
+bottom d = State d S.empty
 
 -- | The initial info state: empty domain, singleton state with an empty assignment
 initState :: State
-initState = (S.empty, S.singleton M.empty)
+initState = State S.empty (S.singleton M.empty)
+
+-- | Extend a state to a larger domain
+extendBy :: Domain -> State -> State
+extendBy d s = foldl' addRef s d
+
+-- | Restrict a state to a smaller domain
+reduceBy :: Domain -> State -> State
+reduceBy d t = foldl' delRef t d
+
+-- | Subtract two states by restricting the second to the domain of the first
+(\\) :: State -> State -> State
+(State domS s) \\ t = State domS (s S.\\ info (reduceBy domS t))
+
+-- | State complementation; involutive
+complement :: State -> State
+complement s@(State domS _) = top domS \\ s
 
 -- | Lattice operations with the usual axioms
 class Lattice a where
@@ -98,48 +83,53 @@ class Lattice a where
 -- | States form a natural lattice
 instance Lattice State where
   s /\ t =
-    let dom = fst s `S.union` fst t
-        sE = snd (extend s dom)
-        tE = snd (extend t dom)
-     in (dom, sE `S.intersection` tE)
+    let d = dom s `S.union` dom t
+        sE = info (extendBy (d S.\\ dom s) s)
+        tE = info (extendBy (d S.\\ dom t) t)
+     in State d (sE `S.intersection` tE)
 
   s \/ t =
-    let dom = fst s `S.intersection` fst t
-        sR = snd (restrict s dom)
-        tR = snd (restrict t dom)
-     in (dom, sR `S.union` tR)
+    let d = dom s `S.intersection` dom t
+        sR = info (reduceBy (d S.\\ dom s) s)
+        tR = info (reduceBy (d S.\\ dom t) t)
+     in State d (sR `S.union` tR)
 
 -- Formulas and dynamic and static interpretations
 
+-- | Variable-free first-order formulas with random assignment.
 data Form
   = Rel ([E] -> Bool) [Var]
   | Ex Var
   | Not Form
   | And Form Form
 
-evalDPL :: Form -> State -> Either String State
-evalDPL (Rel r vs) (dom, s)
-  | S.fromList vs `S.isSubsetOf` dom =
-      let proj g = map (g M.!) vs
-       in Right (dom, S.filter (r . proj) s)
-  | otherwise = Left "Un-familiar"
-evalDPL (Ex v) s@(dom, _)
-  | v `S.member` dom = Left "Un-novel"
-  | otherwise = Right (addRef s v)
-evalDPL (Not p) s = (s \\) <$> evalDPL p s
-evalDPL (And p q) s = evalDPL p s >>= evalDPL q
+-- | Resolve a sequence of variables at an assignment.
+resolve :: [Var] -> G -> [E]
+resolve vs g = map (g M.!) vs
 
+-- | Static content of a formula.
 evalStatic :: Form -> State
 evalStatic (Rel r vs) =
-  let dom = S.fromList vs
-      s = snd (stateFromDomain dom)
-      proj g = map (g M.!) vs
-   in (dom, S.filter (r . proj) s)
+  let d = S.fromList vs
+      s = info (top d)
+   in State d (S.filter (r . resolve vs) s)
 evalStatic (Ex v) = top (S.singleton v)
 evalStatic (Not p) = complement prej
   where
     prej = bottom (fvSem (evalDPL p)) \/ evalStatic p
 evalStatic (And p q) = evalStatic p /\ evalStatic q
+
+-- | Dynamic evaluation: update an state with a formula.
+evalDPL :: Form -> State -> Either String State
+evalDPL (Rel r vs) (State d s)
+  | S.fromList vs `S.isSubsetOf` d =
+      Right (State d (S.filter (r . resolve vs) s))
+  | otherwise = Left "Un-familiar"
+evalDPL (Ex v) s@(State d _)
+  | v `S.member` d = Left "Un-novel"
+  | otherwise = Right (addRef s v)
+evalDPL (Not p) s = (s \\) <$> evalDPL p s
+evalDPL (And p q) s = evalDPL p s >>= evalDPL q
 
 -- Dekker 1996 proves:
 -- when defined, evalDPL phi s == s /\ evalStatic phi
@@ -164,7 +154,7 @@ fvSem upd = go vars initState (S.fromList vars)
     go _ _ acc
       | S.null acc = acc
     go [] s acc
-      | isRight (upd s) = acc `S.intersection` fst s
+      | isRight (upd s) = acc `S.intersection` dom s
       | otherwise = acc
     go (v : vs) s acc =
       let acc1 = go vs s acc
@@ -172,17 +162,15 @@ fvSem upd = go vars initState (S.fromList vars)
        in acc2
 
 -- Examples
-s0 :: Form
+gt :: [E] -> Bool
+gt [x, y] = x > y
+gt _      = error "arity"
+
+s0, s1, ex, ey :: Form
 s0 = And (Ex X) (Ex Y)
-
-s1 :: Form
 s1 = Not (And (Ex Z) (Rel gt [Z, X]))
-  where
-    gt [x, y] = x > y
-    gt _ = error "arity"
-
-ex :: Form
 ex = And s0 s1
+ey = And s1 s0
 
 test :: Bool
 test = Right (evalStatic ex) == evalDPL ex initState
