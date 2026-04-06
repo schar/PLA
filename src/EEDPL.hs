@@ -115,8 +115,8 @@ evalStatic (Ex v) = top (S.singleton v)
 evalStatic (Not p) = complement prej
   where
     pSem = evalStatic p
-    prej = bottom (fvSem candidates (evalDPL p)) \/ pSem
-    candidates = S.toList (dom pSem)
+    vars = S.toList (dom pSem)
+    prej = bottom (fvSem vars (evalDPL p)) \/ pSem
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
 -- | Dynamic evaluation: update an state with a formula.

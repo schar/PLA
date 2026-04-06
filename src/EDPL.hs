@@ -122,7 +122,9 @@ evalStatic (Rel r vs) =
 evalStatic (Ex v) = top (S.singleton v)
 evalStatic (Not p) = complement prej
   where
-    prej = bottom (fvSem (evalDPL p)) \/ evalStatic p
+    pSem = evalStatic p
+    varL = S.toList (dom pSem)
+    prej = bottom (fvSem varL (evalDPL p)) \/ pSem
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
 -- | Dynamic evaluation: update an state with a formula.
@@ -154,8 +156,8 @@ ivSyn (Not _)    = S.empty
 ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
 -}
 
-fvSem :: (State -> Either err State) -> Domain
-fvSem upd = go vars initState (S.fromList vars)
+fvSem :: [Var] -> (State -> Either err State) -> Domain
+fvSem candidates upd = go candidates initState (S.fromList vars)
   where
     go _ _ acc
       | S.null acc = acc

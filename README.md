@@ -10,6 +10,9 @@ Three perspectives:
 - **EDPL** — Assignments as maps. States as sets of assignments tagged with a
 common domain. Ill-formed updates rejected at runtime. Natural lattice structure
 on states.
+- **EEDPL** — A more efficient version that accumulates constraints on
+assignments inside states and delays materializing them as long as possible.
+Otherwise equivalent to EDPL.
 - **PLA** — Stack-based (de Bruijn) assignments. States are predicates of stacks
 tagged with their common length. Ill-formed updates rejected at runtime.
 - **PLASafe** — Stack-based assignments with type-level domain and extension
