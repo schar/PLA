@@ -14,41 +14,67 @@ type E = Int
 univ :: [E]
 univ = [1 .. 100]
 
+-- | Named variables.
 newtype Var = Var Char
   deriving (Eq, Ord, Enum, Show)
 
--- | Partial assignments as maps
+-- | Partial variable assignments.
 type G = M.Map Var E
 
 -- States and operations on states
 
 -- | A State is a domain and a set of partial assignments over that domain
-data State = State {dom :: Domain, info :: G -> Bool}
+data State = State {dom :: Domain, info :: Info}
 
 -- | Domains are sets of variables
 type Domain = S.Set Var
 
+-- | Info states are properties of assignments
+type Info = G -> Bool
+
+domPlus :: Domain -> Domain -> Domain
+domPlus = S.union
+
+domDiff :: Domain -> Domain -> Domain
+domDiff = (S.\\)
+
+domZero :: Domain
+domZero = S.empty
+
+domMeet :: Domain -> Domain -> Domain
+domMeet = S.union
+
+domJoin :: Domain -> Domain -> Domain
+domJoin = S.intersection
+
+infoMeet :: Info -> Info -> Info
+infoMeet f g e = f e && g e
+
+infoJoin :: Info -> Info -> Info
+infoJoin f g e = f e || g e
+
+-- | Tautologous state over a domain.
+top :: Domain -> State
+top d = State d (const True)
+
+-- | Maximal/contradictory state over a domain.
+bottom :: Domain -> State
+bottom d = complement (top d)
+
+-- | The initial info state: empty domain, singleton state with an empty
+-- assignment.
+initState :: State
+initState = top domZero
+
 -- | Add a referent to a state
 addRef :: State -> Var -> State
 addRef (State d s) v =
-  State (S.insert v d) (s . M.delete v)
+  State (d `domPlus` S.singleton v) (s . M.delete v)
 
 -- | Delete a referent from a state
 delRef :: State -> Var -> State
 delRef (State d s) v =
-  State (S.delete v d) (\g -> any (\x -> s (M.insert v x g)) univ)
-
--- | Tautologous state over a domain
-top :: Domain -> State
-top d = State d (const True)
-
--- | Maximal/contradictory state over a domain
-bottom :: Domain -> State
-bottom d = State d (const False)
-
--- | The initial info state: empty domain, singleton state with an empty assignment
-initState :: State
-initState = top S.empty
+  State (d `domDiff` S.singleton v) (\g -> any (\x -> s (M.insert v x g)) univ)
 
 -- | Extend a state to a larger domain
 extendBy :: Domain -> State -> State
@@ -61,16 +87,16 @@ reduceBy d t = foldl' delRef t d
 -- | State intersection, same domains.
 (@@) :: State -> State -> State
 State m f @@ State n g
-  | m == n = State m (\e -> f e && g e)
+  | m == n = State m (f `infoMeet` g)
   | otherwise = error "mismatched @@ domains; this shouldn't happen"
-
--- | Subtract two states by restricting the second to the domain of the first
-(\\) :: State -> State -> State
-s \\ t = s @@ complement (reduceBy (dom t S.\\ dom s) t)
 
 -- | State complementation; involutive
 complement :: State -> State
 complement (State d f) = State d (not . f)
+
+-- | Subtract two states by restricting the second to the domain of the first
+(\\) :: State -> State -> State
+s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
 
 -- | Lattice operations with the usual axioms
 class Lattice a where
@@ -82,16 +108,16 @@ class Lattice a where
 -- | States form a natural lattice
 instance Lattice State where
   s /\ t =
-    let d = dom s `S.union` dom t
-        sE = info (extendBy (d S.\\ dom s) s)
-        tE = info (extendBy (d S.\\ dom t) t)
-     in State d (\g -> sE g && tE g)
+    let d = dom s `domMeet` dom t
+        sE = info (extendBy (d `domDiff` dom s) s)
+        tE = info (extendBy (d `domDiff` dom t) t)
+     in State d (sE `infoMeet` tE)
 
   s \/ t =
-    let d = dom s `S.intersection` dom t
-        sR = info (reduceBy (dom s S.\\ d) s)
-        tR = info (reduceBy (dom t S.\\ d) t)
-     in State d (\g -> sR g || tR g)
+    let d = dom s `domJoin` dom t
+        sR = info (reduceBy (dom s `domDiff` d) s)
+        tR = info (reduceBy (dom t `domDiff` d) t)
+     in State d (sR `infoJoin` tR)
 
 -- Formulas and dynamic and static interpretations
 
@@ -155,7 +181,7 @@ ivSyn (Not _)    = S.empty
 ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
 
 fvSem :: [Var] -> (State -> Either err State) -> Domain
-fvSem candidates upd = go candidates initState (S.fromList candidates)
+fvSem vars upd = go vars initState (S.fromList vars)
   where
     go _ _ acc
       | S.null acc = acc

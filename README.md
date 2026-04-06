@@ -8,7 +8,7 @@ first-order interpretations following Dekker
 Three perspectives:
 
 - **EDPL** — Assignments as maps. States as sets of assignments tagged with a
-common domain. Ill-formed updates rejected at runtime. Natural lattice structure
+common domain. Ill-formed updates are runtime errors. Natural lattice structure
 on states.
 - **EEDPL** — A more efficient version that accumulates constraints on
 assignments inside states and delays materializing them as long as possible.
@@ -19,13 +19,13 @@ tagged with their common length. Ill-formed updates rejected at runtime.
 indices, ensuring well-formedness at compile time.
 
 Each system provides static and dynamic interpretation functions. These are
-equivalent in the PLA fragments and Strawson-equivalent in the EDPL fragment
-(`evalStatic` is total, but `evalDPL` is not).
+equivalent in the PLA fragments given `merge`, and Strawson-equivalent in the
+EDPL fragment given `/\` (`evalStatic` is total, but `evalDPL` is not).
 
 ## Build & run
 
 The `.cabal` file requires [GHC `9.6.7`](https://www.haskell.org/ghcup/), but
-works up to `9.14.1`.
+the code works up to GHC `9.14.1`.
 
 ```bash
 cabal build all
