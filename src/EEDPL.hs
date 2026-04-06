@@ -1,5 +1,6 @@
-module EDPL where
+module EEDPL where
 
+import Control.Monad (replicateM)
 import Data.Either (isRight)
 import Data.Foldable (foldl')
 import qualified Data.Map as M
@@ -13,11 +14,8 @@ type E = Int
 univ :: [E]
 univ = [1 .. 100]
 
-data Var = W | X | Y | Z
-  deriving (Eq, Bounded, Ord, Enum, Show)
-
-vars :: [Var]
-vars = [minBound ..]
+newtype Var = Var Char
+  deriving (Eq, Ord, Enum, Show)
 
 -- | Partial assignments as maps
 type G = M.Map Var E
@@ -25,8 +23,7 @@ type G = M.Map Var E
 -- States and operations on states
 
 -- | A State is a domain and a set of partial assignments over that domain
-data State = State {dom :: Domain, info :: S.Set G}
-  deriving (Show, Eq)
+data State = State {dom :: Domain, info :: G -> Bool}
 
 -- | Domains are sets of variables
 type Domain = S.Set Var
@@ -34,28 +31,24 @@ type Domain = S.Set Var
 -- | Add a referent to a state
 addRef :: State -> Var -> State
 addRef (State d s) v =
-  State
-    (S.insert v d)
-    (S.fromList [M.insert v x g | g <- S.toList s, x <- univ])
+  State (S.insert v d) (s . M.delete v)
 
 -- | Delete a referent from a state
 delRef :: State -> Var -> State
 delRef (State d s) v =
-  State
-    (S.delete v d)
-    (S.map (M.delete v) s)
+  State (S.delete v d) (\g -> any (\x -> s (M.insert v x g)) univ)
 
 -- | Tautologous state over a domain
 top :: Domain -> State
-top = foldl' addRef initState
+top d = State d (const True)
 
 -- | Maximal/contradictory state over a domain
 bottom :: Domain -> State
-bottom d = State d S.empty
+bottom d = State d (const False)
 
 -- | The initial info state: empty domain, singleton state with an empty assignment
 initState :: State
-initState = State S.empty (S.singleton M.empty)
+initState = top S.empty
 
 -- | Extend a state to a larger domain
 extendBy :: Domain -> State -> State
@@ -67,8 +60,8 @@ reduceBy d t = foldl' delRef t d
 
 -- | State intersection, same domains.
 (@@) :: State -> State -> State
-State m s @@ State n t
-  | m == n = State m (s `S.intersection` t)
+State m f @@ State n g
+  | m == n = State m (\e -> f e && g e)
   | otherwise = error "mismatched @@ domains; this shouldn't happen"
 
 -- | Subtract two states by restricting the second to the domain of the first
@@ -77,7 +70,7 @@ s \\ t = s @@ complement (reduceBy (dom t S.\\ dom s) t)
 
 -- | State complementation; involutive
 complement :: State -> State
-complement (State d s) = State d (info (top d) S.\\ s)
+complement (State d f) = State d (not . f)
 
 -- | Lattice operations with the usual axioms
 class Lattice a where
@@ -92,13 +85,13 @@ instance Lattice State where
     let d = dom s `S.union` dom t
         sE = info (extendBy (d S.\\ dom s) s)
         tE = info (extendBy (d S.\\ dom t) t)
-     in State d (sE `S.intersection` tE)
+     in State d (\g -> sE g && tE g)
 
   s \/ t =
     let d = dom s `S.intersection` dom t
         sR = info (reduceBy (dom s S.\\ d) s)
         tR = info (reduceBy (dom t S.\\ d) t)
-     in State d (sR `S.union` tR)
+     in State d (\g -> sR g || tR g)
 
 -- Formulas and dynamic and static interpretations
 
@@ -117,19 +110,20 @@ resolve vs g = map (g M.!) vs
 evalStatic :: Form -> State
 evalStatic (Rel r vs) =
   let d = S.fromList vs
-      s = info (top d)
-   in State d (S.filter (r . resolve vs) s)
+   in State d (r . resolve vs)
 evalStatic (Ex v) = top (S.singleton v)
 evalStatic (Not p) = complement prej
   where
-    prej = bottom (fvSem (evalDPL p)) \/ evalStatic p
+    pSem = evalStatic p
+    prej = bottom (fvSem candidates (evalDPL p)) \/ pSem
+    candidates = S.toList (dom pSem)
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
 -- | Dynamic evaluation: update an state with a formula.
 evalDPL :: Form -> State -> Either String State
-evalDPL (Rel r vs) (State d s)
-  | S.fromList vs `S.isSubsetOf` d =
-      Right (State d (S.filter (r . resolve vs) s))
+evalDPL (Rel r vs) s
+  | S.fromList vs `S.isSubsetOf` dom s =
+    Right (s @@ State (dom s) (r . resolve vs))
   | otherwise = Left "Un-familiar"
 evalDPL (Ex v) s@(State d _)
   | v `S.member` d = Left "Un-novel"
@@ -137,10 +131,17 @@ evalDPL (Ex v) s@(State d _)
 evalDPL (Not p) s = (s \\) <$> evalDPL p s
 evalDPL (And p q) s = evalDPL p s >>= evalDPL q
 
+-- | Enumerate all satisfying assignments.
+sat :: State -> [G]
+sat (State d f) = filter f assignments
+  where
+    vs = S.toList d
+    seqs = replicateM (length vs) univ
+    assignments = map (M.fromList . zip vs) seqs
+
 -- Dekker 1996 proves:
 -- when defined, evalDPL phi s == s /\ evalStatic phi
 
-{-
 fvSyn :: Form -> Domain
 fvSyn (Rel _ vs) = S.fromList vs
 fvSyn (Ex _)     = S.empty
@@ -152,10 +153,9 @@ ivSyn (Rel _ _)  = S.empty
 ivSyn (Ex v)     = S.singleton v
 ivSyn (Not _)    = S.empty
 ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
--}
 
-fvSem :: (State -> Either err State) -> Domain
-fvSem upd = go vars initState (S.fromList vars)
+fvSem :: [Var] -> (State -> Either err State) -> Domain
+fvSem candidates upd = go candidates initState (S.fromList candidates)
   where
     go _ _ acc
       | S.null acc = acc
@@ -173,13 +173,13 @@ gt [x, y] = x > y
 gt _      = error "arity"
 
 s0, s1, ex, ey :: Form
-s0 = And (Ex X) (Ex Y)
-s1 = Not (And (Ex Z) (Rel gt [Z, X]))
+s0 = And (Ex (Var 'x')) (Ex (Var 'y'))
+s1 = Not (And (Ex (Var 'z')) (Rel gt [Var 'z', Var 'x']))
 ex = And s0 s1
 ey = And s1 s0
 
 test :: Bool
-test = Right (evalStatic ex) == evalDPL ex initState
+test = (sat <$> Right (evalStatic ex)) == (sat <$> evalDPL ex initState)
 
 main :: IO ()
 main = print test

@@ -14,6 +14,7 @@ common defaults
     DataKinds
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     PartialTypeSignatures
     PolyKinds
     ScopedTypeVariables
@@ -33,6 +34,14 @@ executable EDPL
   ghc-options:
     -main-is
     EDPL
+
+executable EEDPL
+  import: defaults
+  hs-source-dirs: src
+  main-is: EEDPL.hs
+  ghc-options:
+    -main-is
+    EEDPL
 
 executable PLA
   import: defaults
