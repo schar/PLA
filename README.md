@@ -5,7 +5,7 @@ first-order interpretations following Dekker
 ([1996](https://doi.org/10.1007/BF00628200),
 [2002](https://doi.org/10.1023/A:1017575313451)).
 
-Three perspectives:
+Four perspectives:
 
 - **EDPL** — Assignments as maps. States as sets of assignments tagged with a
 common domain. Ill-formed updates are runtime errors. Natural lattice structure

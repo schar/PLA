@@ -8,6 +8,7 @@ import qualified Data.Set as S
 
 -- Basic data and types
 
+-- | The domain of entities is @Int@.
 type E = Int
 
 -- | Universe of discourse.
@@ -32,26 +33,33 @@ type Domain = S.Set Var
 -- | Info states are properties of assignments
 type Info = G -> Bool
 
+-- | Add two domains.
 domPlus :: Domain -> Domain -> Domain
 domPlus = S.union
 
+-- | Subtract two domains.
 domDiff :: Domain -> Domain -> Domain
 domDiff = (S.\\)
 
+-- | The empty domain.
 domZero :: Domain
 domZero = S.empty
 
+-- | The informational meet of two domains.
 domMeet :: Domain -> Domain -> Domain
 domMeet = S.union
 
+-- | The informational join of two domains.
 domJoin :: Domain -> Domain -> Domain
 domJoin = S.intersection
 
+-- | The informational meet of two info contents.
 infoMeet :: Info -> Info -> Info
-infoMeet f g e = f e && g e
+infoMeet = liftA2 (&&)
 
+-- | The informational join of two info contents.
 infoJoin :: Info -> Info -> Info
-infoJoin f g e = f e || g e
+infoJoin = liftA2 (||)
 
 -- | Tautologous state over a domain.
 top :: Domain -> State
@@ -78,11 +86,17 @@ delRef (State d s) v =
 
 -- | Extend a state to a larger domain
 extendBy :: Domain -> State -> State
-extendBy d s = foldl' addRef s d
+extendBy = flip (foldl' addRef)
 
 -- | Restrict a state to a smaller domain
 reduceBy :: Domain -> State -> State
-reduceBy d t = foldl' delRef t d
+reduceBy = flip (foldl' delRef)
+
+-- | State merge
+merge :: State -> State -> State
+merge (State d s) (State d' t)
+  | d `S.disjoint` d' = State (d `domPlus` d') (\e -> s (M.restrictKeys e d) && t e)
+  | otherwise = error "Merge: overlapping domains (novelty)"
 
 -- | State intersection, same domains.
 (@@) :: State -> State -> State
@@ -145,6 +159,15 @@ evalStatic (Not p) = complement prej
     prej = bottom (fvSem vars (evalDPL p)) \/ pSem
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
+-- | Static content of a formula, *with* novelty and familiarity, following
+-- @PLA@. It is crucial that @info s@ is a partial @G -> Bool@ function, and so
+-- this can't be replicated in @EDPL@.
+evalStatic' :: Form -> State
+evalStatic' (Rel r vs) = State domZero (r . resolve vs)     -- familiarity from @resolve@
+evalStatic' (Ex v) = top (S.singleton v)
+evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
+evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
+
 -- | Dynamic evaluation: update an state with a formula.
 evalDPL :: Form -> State -> Either String State
 evalDPL (Rel r vs) s
@@ -170,15 +193,15 @@ sat (State d f) = filter f assignments
 
 fvSyn :: Form -> Domain
 fvSyn (Rel _ vs) = S.fromList vs
-fvSyn (Ex _)     = S.empty
+fvSyn (Ex _)     = domZero
 fvSyn (Not p)    = fvSyn p
-fvSyn (And p q)  = fvSyn p `S.union` (fvSyn q `S.difference` ivSyn p)
+fvSyn (And p q)  = fvSyn p `domPlus` (fvSyn q `domDiff` ivSyn p)
 
 ivSyn :: Form -> Domain
-ivSyn (Rel _ _)  = S.empty
+ivSyn (Rel _ _)  = domZero
 ivSyn (Ex v)     = S.singleton v
-ivSyn (Not _)    = S.empty
-ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
+ivSyn (Not _)    = domZero
+ivSyn (And p q)  = ivSyn p `domPlus` ivSyn q
 
 fvSem :: [Var] -> (State -> Either err State) -> Domain
 fvSem vars upd = go vars initState (S.fromList vars)
@@ -204,8 +227,13 @@ s1 = Not (And (Ex (Var 'z')) (Rel gt [Var 'z', Var 'x']))
 ex = And s0 s1
 ey = And s1 s0
 
-test :: Bool
-test = (sat <$> Right (evalStatic ex)) == (sat <$> evalDPL ex initState)
+test0 :: Bool
+test0 = (sat <$> Right (evalStatic ex)) == (sat <$> evalDPL ex initState)
+
+test1 :: Bool
+test1 = sat (evalStatic ex) == sat (evalStatic' ex)
 
 main :: IO ()
-main = print test
+main = do
+  putStrLn $ "test0 (static vs DPL):     " ++ show test0
+  putStrLn $ "test1 (static vs static'): " ++ show test1
