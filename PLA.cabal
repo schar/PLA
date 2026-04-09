@@ -58,3 +58,15 @@ executable PLASafe
   ghc-options:
     -main-is
     PLASafe
+
+test-suite eedpl-tests
+  import: defaults
+  type: exitcode-stdio-1.0
+  hs-source-dirs:
+    test
+    src
+
+  main-is: EEDPLSpec.hs
+  other-modules: EEDPL
+  build-depends:
+    QuickCheck
