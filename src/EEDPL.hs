@@ -22,16 +22,16 @@ newtype Var = Var Char
 -- | Partial variable assignments.
 type G = M.Map Var E
 
--- States and operations on states
-
--- | A State is a domain and a set of partial assignments over that domain
+-- | A State is a domain and an info state.
 data State = State {dom :: Domain, info :: Info}
 
--- | Domains are sets of variables
+-- | Domains are sets of variables.
 type Domain = S.Set Var
 
--- | Info states are properties of assignments
+-- | Info states are properties of assignments.
 type Info = G -> Bool
+
+-- Operations on and in states
 
 -- | Add two domains.
 domPlus :: Domain -> Domain -> Domain
@@ -69,8 +69,7 @@ top d = State d (const True)
 bottom :: Domain -> State
 bottom d = complement (top d)
 
--- | The initial info state: empty domain, singleton state with an empty
--- assignment.
+-- | The initial info state: empty domain, trivial info content.
 initState :: State
 initState = top domZero
 
@@ -92,34 +91,42 @@ extendBy = flip (foldl' addRef)
 reduceBy :: Domain -> State -> State
 reduceBy = flip (foldl' delRef)
 
--- | State merge
+-- | State merge, given disjoint domains. Analogous to PLA.
 merge :: State -> State -> State
 merge (State d s) (State d' t)
   | d `S.disjoint` d' = State (d `domPlus` d') (\e -> s (M.restrictKeys e d) && t e)
   | otherwise = error "Merge: overlapping domains (novelty)"
 
--- | State intersection, same domains.
+-- | State intersection, given same domains.
 (@@) :: State -> State -> State
 State m f @@ State n g
   | m == n = State m (f `infoMeet` g)
   | otherwise = error "mismatched @@ domains; this shouldn't happen"
 
--- | State complementation; involutive
+-- | State complementation (involutive).
 complement :: State -> State
 complement (State d f) = State d (not . f)
 
--- | Subtract two states by restricting the second to the domain of the first
+-- | Subtract two states by restricting the second to the domain of the first.
 (\\) :: State -> State -> State
 s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
 
--- | Lattice operations with the usual axioms
+-- | Enumerate all satisfying assignments for a state.
+sat :: State -> [G]
+sat (State d f) = filter f assignments
+  where
+    vs = S.toList d
+    seqs = replicateM (length vs) univ
+    assignments = map (M.fromList . zip vs) seqs
+
+-- | Lattice operations with the usual axioms.
 class Lattice a where
   -- | join
   (\/) :: a -> a -> a
   -- | meet
   (/\) :: a -> a -> a
 
--- | States form a natural lattice
+-- | States form a natural lattice.
 instance Lattice State where
   s /\ t =
     let d = dom s `domMeet` dom t
@@ -146,63 +153,44 @@ data Form
 resolve :: [Var] -> G -> [E]
 resolve vs g = map (g M.!) vs
 
--- | Static content of a formula.
+-- | Standard dynamic evaluation: update a state with a formula. Uses @Either@
+-- to facilitate @fvSem@ below.
+evalDyn :: Form -> State -> Either String State
+evalDyn (Rel r vs) s
+  | S.fromList vs `S.isSubsetOf` dom s =
+    Right (s @@ State (dom s) (r . resolve vs))
+  | otherwise = Left "Un-familiar"
+evalDyn (Ex v) s@(State d _)
+  | v `S.member` d = Left "Un-novel"
+  | otherwise = Right (addRef s v)
+evalDyn (Not p) s = (s \\) <$> evalDyn p s
+evalDyn (And p q) s = evalDyn p s >>= evalDyn q
+
+-- | Static content of a formula. Indefinites are variables (or vice versa).
 evalStatic :: Form -> State
-evalStatic (Rel r vs) =
-  let d = S.fromList vs
-   in State d (r . resolve vs)
+evalStatic (Rel r vs) = State (S.fromList vs) (r . resolve vs)
 evalStatic (Ex v) = top (S.singleton v)
 evalStatic (Not p) = complement prej
   where
     pSem = evalStatic p
     vars = S.toList (dom pSem)
-    prej = bottom (fvSem vars (evalDPL p)) \/ pSem
+    prej = bottom (fvSem vars (evalDyn p)) \/ pSem
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
 -- | Static content of a formula, *with* novelty and familiarity, following
 -- @PLA@. It is crucial that @info s@ is a partial @G -> Bool@ function, and so
--- this can't be replicated in @EDPL@.
+-- this can't be replicated in @EDPL@. Indefinites and variables kept separate.
 evalStatic' :: Form -> State
 evalStatic' (Rel r vs) = State domZero (r . resolve vs)     -- familiarity from @resolve@
 evalStatic' (Ex v) = top (S.singleton v)
 evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
 
--- | Dynamic evaluation: update an state with a formula.
-evalDPL :: Form -> State -> Either String State
-evalDPL (Rel r vs) s
-  | S.fromList vs `S.isSubsetOf` dom s =
-    Right (s @@ State (dom s) (r . resolve vs))
-  | otherwise = Left "Un-familiar"
-evalDPL (Ex v) s@(State d _)
-  | v `S.member` d = Left "Un-novel"
-  | otherwise = Right (addRef s v)
-evalDPL (Not p) s = (s \\) <$> evalDPL p s
-evalDPL (And p q) s = evalDPL p s >>= evalDPL q
-
--- | Enumerate all satisfying assignments.
-sat :: State -> [G]
-sat (State d f) = filter f assignments
-  where
-    vs = S.toList d
-    seqs = replicateM (length vs) univ
-    assignments = map (M.fromList . zip vs) seqs
-
 -- Dekker 1996 proves:
--- when defined, evalDPL phi s == s /\ evalStatic phi
+-- When defined: evalDyn phi s == s /\ evalStatic phi (Strawson equivalence)
+-- We add: evalDyn phi s == s `merge` evalStatic' phi (equivalence)
 
-fvSyn :: Form -> Domain
-fvSyn (Rel _ vs) = S.fromList vs
-fvSyn (Ex _)     = domZero
-fvSyn (Not p)    = fvSyn p
-fvSyn (And p q)  = fvSyn p `domPlus` (fvSyn q `domDiff` ivSyn p)
-
-ivSyn :: Form -> Domain
-ivSyn (Rel _ _)  = domZero
-ivSyn (Ex v)     = S.singleton v
-ivSyn (Not _)    = domZero
-ivSyn (And p q)  = ivSyn p `domPlus` ivSyn q
-
+-- | Helper function for finding free variables semantically. Needs @Either@.
 fvSem :: [Var] -> (State -> Either err State) -> Domain
 fvSem vars upd = go vars initState (S.fromList vars)
   where
@@ -216,24 +204,47 @@ fvSem vars upd = go vars initState (S.fromList vars)
           acc2 = go vs (addRef s v) acc1
        in acc2
 
--- Examples
+-- | Syntactically finding free variables.
+fvSyn :: Form -> Domain
+fvSyn (Rel _ vs) = S.fromList vs
+fvSyn (Ex _)     = domZero
+fvSyn (Not p)    = fvSyn p
+fvSyn (And p q)  = fvSyn p `domPlus` (fvSyn q `domDiff` ivSyn p)
+
+-- | Syntactically finding introduced variables.
+ivSyn :: Form -> Domain
+ivSyn (Rel _ _)  = domZero
+ivSyn (Ex v)     = S.singleton v
+ivSyn (Not _)    = domZero
+ivSyn (And p q)  = ivSyn p `domPlus` ivSyn q
+
+-- Examples/tests.
+
 gt :: [E] -> Bool
 gt [x, y] = x > y
 gt _      = error "arity"
 
+lt :: [E] -> Bool
+lt [x, y] = x < y
+lt _     = error "arity"
+
 s0, s1, ex, ey :: Form
+-- | There is an @x@ and there is a @y@.
 s0 = And (Ex (Var 'x')) (Ex (Var 'y'))
+-- | There is no @z@ greater than @x@.
 s1 = Not (And (Ex (Var 'z')) (Rel gt [Var 'z', Var 'x']))
+-- | Conjoining in anaphoric order.
 ex = And s0 s1
+-- | Conjoining in cataphoric order.
 ey = And s1 s0
 
 test0 :: Bool
-test0 = (sat <$> Right (evalStatic ex)) == (sat <$> evalDPL ex initState)
+test0 = Right (sat (evalStatic  ex)) == (sat <$> evalDyn ex initState)
 
 test1 :: Bool
-test1 = sat (evalStatic ex) == sat (evalStatic' ex)
+test1 = Right (sat (evalStatic' ex)) == (sat <$> evalDyn ex initState)
 
 main :: IO ()
 main = do
-  putStrLn $ "test0 (static vs DPL):     " ++ show test0
-  putStrLn $ "test1 (static vs static'): " ++ show test1
+  putStrLn $ "test0 (static  vs DPL): " ++ show test0
+  putStrLn $ "test1 (static' vs DPL): " ++ show test1
