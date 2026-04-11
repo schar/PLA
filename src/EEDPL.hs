@@ -126,7 +126,7 @@ class Lattice a where
   -- | meet
   (/\) :: a -> a -> a
 
--- | States form a natural lattice.
+-- | States form a lattice.
 instance Lattice State where
   s /\ t =
     let d = dom s `domMeet` dom t
@@ -142,7 +142,7 @@ instance Lattice State where
 
 -- Formulas and dynamic and static interpretations
 
--- | Variable-free first-order formulas with random assignment.
+-- | First-order formulas with random assignment.
 data Form
   = Rel ([E] -> Bool) [Var]
   | Ex Var
@@ -177,6 +177,10 @@ evalStatic (Not p) = complement prej
     prej = bottom (fvSem vars (evalDyn p)) \/ pSem
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
+-- Dekker 1996 proves:
+-- When defined: evalDyn phi s == s /\ evalStatic phi (Strawson equivalence)
+-- We add: evalDyn phi s == s `merge` evalStatic' phi (equivalence)
+
 -- | Static content of a formula, *with* novelty and familiarity, following
 -- @PLA@. It is crucial that @info s@ is a partial @G -> Bool@ function, and so
 -- this can't be replicated in @EDPL@. Indefinites and variables kept separate.
@@ -185,10 +189,6 @@ evalStatic' (Rel r vs) = State domZero (r . resolve vs)     -- familiarity from 
 evalStatic' (Ex v) = top (S.singleton v)
 evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
-
--- Dekker 1996 proves:
--- When defined: evalDyn phi s == s /\ evalStatic phi (Strawson equivalence)
--- We add: evalDyn phi s == s `merge` evalStatic' phi (equivalence)
 
 -- | Helper function for finding free variables semantically. Needs @Either@.
 fvSem :: [Var] -> (State -> Either err State) -> Domain
