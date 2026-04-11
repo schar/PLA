@@ -3,6 +3,7 @@ module EEDPL where
 import Control.Monad (replicateM)
 import Data.Either (isRight)
 import Data.Foldable (foldl')
+import Data.List (subsequences)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -97,6 +98,10 @@ merge (State d s) (State d' t)
   | d `S.disjoint` d' = State (d `domPlus` d') (\e -> s (M.restrictKeys e d) && t e)
   | otherwise = error "Merge: overlapping domains (novelty)"
 
+-- | Symmetric / Zeevat merge
+mergeSymm :: State -> State -> State
+mergeSymm (State d s) (State d' t) = State (d `domPlus` d') (s `infoMeet` t)
+
 -- | State intersection, given same domains.
 (@@) :: State -> State -> State
 State m f @@ State n g
@@ -118,6 +123,19 @@ sat (State d f) = filter f assignments
     vs = S.toList d
     seqs = replicateM (length vs) univ
     assignments = map (M.fromList . zip vs) seqs
+
+-- | An alternative perspective on update and context initialization.
+-- Materialization of a state involves realizing every partial assignment
+-- consistent with it.
+satElim :: [Var] -> State -> [G]
+satElim vars (State d f) = filter f partials
+  where
+    partials =
+      [ M.fromList (zip sub vals)
+        | sub <- subsequences vars,
+          d `S.isSubsetOf` S.fromList sub,
+          vals <- replicateM (length sub) univ
+      ]
 
 -- | Lattice operations with the usual axioms.
 class Lattice a where
