@@ -208,6 +208,16 @@ evalStatic' (Ex v) = top (S.singleton v)
 evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
 
+-- | Static content of a formula, like @evalStatic@ but with only *introduced*
+-- variables in a @State@'s @dom@. Allows a more straightforward definition of
+-- negation as the complement of the prejacent, and conjunction in terms of
+-- symmetric merge. Still Strawson equivalent to @evalDyn@(?)
+evalStatic'' :: Form -> State
+evalStatic'' (Rel r vs) = State domZero (((S.fromList vs `S.isSubsetOf`) . M.keysSet) `infoMeet` (r . resolve vs))
+evalStatic'' (Ex v) = top (S.singleton v)
+evalStatic'' (Not p) = let s = evalStatic'' p in complement (reduceBy (dom s) s)
+evalStatic'' (And p q) = evalStatic'' p `mergeSymm` evalStatic'' q
+
 -- | Helper function for finding free variables semantically. Needs @Either@.
 fvSem :: [Var] -> (State -> Either err State) -> Domain
 fvSem vars upd = go vars initState (S.fromList vars)
