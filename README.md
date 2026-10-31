@@ -8,63 +8,35 @@ first-order interpretations following Dekker
 Five perspectives:
 
 - **EDPL** — Assignments as maps. States as sets of assignments tagged with a
-common domain. Ill-formed updates (an unfamiliar variable, a non-novel
-indefinite) return `Left`. Natural lattice structure on states.
-- **EEDPL** — A more efficient version that accumulates constraints on
-assignments inside states (info states are predicates) and delays
-materializing them as long as possible. Otherwise equivalent to EDPL.
-- **PLA** — Stack-based (de Bruijn) assignments. States are predicates of stacks
-tagged with their common length. Ill-formed updates are not checked; an
-out-of-range pronoun errors when a state is materialized.
-- **PLASafe** — Stack-based assignments with type-level domain and extension
-indices, ensuring well-formedness at compile time.
-- **SEDPL** — EDPL over referent systems (Vermeulen's sequence semantics): a
-variable points to a stack of values, so reintroducing it shadows the old
-value rather than clashing. No novelty condition; identical to EDPL wherever
-EDPL is defined, and `evalDyn` is exactly `merge` with `evalStatic'` everywhere.
-
-The value-level fragments share `src/Shared.hs`: a `Domain` class for domains
-of referents and a `System` class for states over them, from which `bottom`,
-`initState`, `@@`, `\\`, `/\` and `\/` are defined once. Each fragment
-supplies its carrier types, `top`, `complement`, `extendBy`, `reduceBy` and
-the same-domain meet and join of info; what differs between them stays in the
-fragment: `merge`, the formulas and the interpretations. The modules form a
-library; each executable is a one-line `app/<Name>/Main.hs`, so every source
-file belongs to one cabal component, which is what HLS needs.
+common domain. Unfamiliar pronouns and non-novel indefinites return `Left`.
+Natural lattice structure on states.
+- **EEDPL** — The same, with states as predicates on assignments, materialized
+only when needed.
+- **SEDPL** — EDPL over referent systems (Vermeulen 1993): a variable points to
+a stack of values, so reintroducing it shadows rather than clashes. No
+novelty condition.
+- **PLA** — Stack-based (de Bruijn) assignments. States are predicates of
+stacks tagged with their common length.
+- **PLASafe** — The same, with domain and extension tracked in the types, so
+ill-formed updates are compile-time errors.
 
 Each system provides a dynamic interpretation `evalDyn` and a static one
-`evalStatic`. In the PLA fragments they are equivalent given `merge`. In the
-EDPL fragments they are Strawson-equivalent given `/\` (`evalStatic` is total,
-but `evalDyn` is not). EEDPL adds two further static interpretations:
-
-- `evalStatic'`, with novelty from `merge` and from the disjoint union of
-  assignments under negation, and familiarity from a partial info function, which
-  is exactly equivalent to `evalDyn` given `merge`;
-- `evalStatic''`, with only introduced variables in a state's domain and
-  Zeevat's symmetric merge for conjunction: total, with no novelty or
-  familiarity conditions, and Strawson-equivalent to `evalDyn`.
+`evalStatic`. In the PLA fragments they are equivalent given `merge`; in the
+EDPL fragments, Strawson-equivalent given `/\` (`evalStatic` is total,
+`evalDyn` is not). EEDPL and SEDPL add `evalStatic'`, exactly equivalent to
+`evalDyn` given `merge`, and `evalStatic''`, a total variant with Zeevat's
+symmetric merge. What the fragments share is in `src/Shared.hs`.
 
 ## Build & run
 
-Requires GHC 9.10 or later ([ghcup](https://www.haskell.org/ghcup/)).
+Requires GHC 9.10 or later.
 
 ```bash
 cabal build all
 cabal run EDPL # or: EEDPL / SEDPL / PLA / PLASafe
-```
-
-```bash
-cabal repl
-```
-
-`cabal repl` loads the library, all six modules, as optimised object code
-(`-fobject-code -O2` are in the cabal file's `ghc-options`); `:m EEDPL`
-brings a module's exports into scope. For a quick interpreted look,
-`ghci -isrc src/EEDPL.hs`.
-
-The QuickCheck suite for EEDPL (Strawson and merge equivalence, lattice laws,
-syntactic vs. semantic free variables):
-
-```bash
 cabal test
+```
+
+```bash
+cabal repl # then, e.g., :m EEDPL
 ```
