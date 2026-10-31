@@ -188,7 +188,7 @@ genState = do
     hashG g = sum [fromEnum c * v | (Var c, v) <- M.toList g]
 
 -- | Generate a state whose domain includes @required@ but excludes @excluded@.
-genStateOver :: Domain -> Domain -> Gen State
+genStateOver :: Vars -> Vars -> Gen State
 genStateOver required excluded = do
   let eligible = filter (\v -> v `S.notMember` required && v `S.notMember` excluded) allVars
   extra <- sublistOf eligible

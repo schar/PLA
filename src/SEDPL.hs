@@ -1,4 +1,6 @@
-module SEDPL where
+{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
+
+module SEDPL (module SEDPL, module Shared) where
 
 -- EDPL over referent systems, after Vermeulen's sequence semantics (1993): a
 -- variable points to a stack of values, newest first. Reintroducing a variable pushes a
@@ -9,6 +11,7 @@ module SEDPL where
 
 import Control.Monad (replicateM)
 import qualified Data.Map as M
+import Shared
 
 type E = Int
 
@@ -23,22 +26,19 @@ newtype Var = Var Char
 type G = M.Map Var [E]
 
 -- | A domain: how many referents each variable has.
-type Dom = M.Map Var Int
+type Counts = M.Map Var Int
 
-type Info = G -> Bool
+data State = State !Counts (G -> Bool)
 
-data State = State {dom :: !Dom, info :: Info}
+instance Domain Counts where
+  zero = M.empty
+  widen = M.unionWith max
+  narrow = M.intersectionWith min
+  diff = M.differenceWith (\m n -> if m > n then Just (m - n) else Nothing)
 
--- Domains
-
-domPlus, domDiff, domMeet, domJoin :: Dom -> Dom -> Dom
-domPlus = M.unionWith (+)
-domDiff = M.differenceWith (\m n -> if m > n then Just (m - n) else Nothing)
-domMeet = M.unionWith max
-domJoin = M.intersectionWith min
-
-domZero :: Dom
-domZero = M.empty
+-- | Add counts: the referents of both.
+plus :: Counts -> Counts -> Counts
+plus = M.unionWith (+)
 
 -- Referent systems
 
@@ -47,11 +47,11 @@ pop :: Var -> G -> G
 pop = M.update (\xs -> case drop 1 xs of [] -> Nothing; ys -> Just ys)
 
 -- | Drop the newest @n@ values of each variable, per a domain.
-popBy :: Dom -> G -> G
+popBy :: Counts -> G -> G
 popBy c g = M.foldrWithKey (\v n h -> iterate (pop v) h !! n) g c
 
 -- | Every choice of fresh values for a domain, as stacks to push.
-witnesses :: Dom -> [G]
+witnesses :: Counts -> [G]
 witnesses = traverse (\n -> replicateM n univ)
 
 -- | Push fresh values on top of a referent system.
@@ -68,42 +68,29 @@ resolve vs g = map top1 vs
 
 -- States
 
-top :: Dom -> State
-top d = State d (const True)
+instance System State where
+  type Dom State = Counts
+  dom (State d _) = d
+  top d = State d (const True)
+  complement (State d f) = State d (not . f)
 
-bottom :: Dom -> State
-bottom = complement . top
+  -- Add unconstrained referents: the state ignores the newest values.
+  extendBy c (State d s) = State (d `plus` c) (s . popBy c)
 
-initState :: State
-initState = top domZero
+  -- Existentially close referents: some fresh values satisfy the state.
+  reduceBy c (State d s) = State (d `diff` c) (\g -> any (\j -> s (pushAll j g)) (witnesses c))
 
--- | Add unconstrained referents: the state ignores the newest values.
-extendBy :: Dom -> State -> State
-extendBy c (State d s) = State (d `domPlus` c) (s . popBy c)
-
--- | Existentially close referents: some fresh values satisfy the state.
-reduceBy :: Dom -> State -> State
-reduceBy c (State d s) = State (d `domDiff` c) (\g -> any (\j -> s (pushAll j g)) (witnesses c))
-
-(@@) :: State -> State -> State
-State m f @@ State n g
-  | m == n = State m (\e -> f e && g e)
-  | otherwise = error "mismatched @@ domains; this shouldn't happen"
-
-complement :: State -> State
-complement (State d f) = State d (not . f)
-
-(\\) :: State -> State -> State
-s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
+  infoMeet (State d s) (State _ t) = State d (liftA2 (&&) s t)
+  infoJoin (State d s) (State _ t) = State d (liftA2 (||) s t)
 
 -- | Dekker's conjunction: the left state sees the input minus the right
 -- state's referents. Nothing can clash, so nothing is checked.
 merge :: State -> State -> State
-merge (State d s) (State d' t) = State (d `domPlus` d') (\g -> s (popBy d' g) && t g)
+merge (State d s) (State d' t) = State (d `plus` d') (\g -> s (popBy d' g) && t g)
 
 -- | Zeevat's symmetric merge.
 mergeSymm :: State -> State -> State
-mergeSymm (State d s) (State d' t) = State (d `domPlus` d') (\g -> s g && t g)
+mergeSymm (State d s) (State d' t) = State (d `plus` d') (\g -> s g && t g)
 
 -- | Enumerate all satisfying referent systems for a state.
 sat :: State -> [G]
@@ -129,7 +116,7 @@ evalDyn (And p q) s = evalDyn p s >>= evalDyn q
 -- | Static content, following the talk's ⟨⟨φ⟩⟩: a count and a predicate.
 -- @evalDyn φ s == s `merge` evalStatic' φ@ when defined (tested below).
 evalStatic' :: Form -> State
-evalStatic' (Rel r vs) = State domZero (r . resolve vs) -- familiarity from @resolve@
+evalStatic' (Rel r vs) = State zero (r . resolve vs) -- familiarity from @resolve@
 evalStatic' (Ex v) = top (M.singleton v 1)
 evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q
@@ -140,7 +127,7 @@ evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q
 -- Once novelty is free, conjunction must be asymmetric (as in @PLA@, where
 -- every push shifts the indices).
 evalStatic'' :: Form -> State
-evalStatic'' (Rel r vs) = State domZero (\g -> all (`M.member` g) vs && r (resolve vs g))
+evalStatic'' (Rel r vs) = State zero (\g -> all (`M.member` g) vs && r (resolve vs g))
 evalStatic'' (Ex v) = top (M.singleton v 1)
 evalStatic'' (Not p) = let s = evalStatic'' p in complement (reduceBy (dom s) s)
 evalStatic'' (And p q) = evalStatic'' p `mergeSymm` evalStatic'' q

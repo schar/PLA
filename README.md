@@ -23,6 +23,13 @@ variable points to a stack of values, so reintroducing it shadows the old
 value rather than clashing. No novelty condition; identical to EDPL wherever
 EDPL is defined, and `evalDyn` is exactly `merge` with `evalStatic'` everywhere.
 
+The value-level fragments share `src/Shared.hs`: a `Domain` class for domains
+of referents and a `System` class for states over them, from which `bottom`,
+`initState`, `@@`, `\\`, `/\` and `\/` are defined once. Each fragment
+supplies its carrier types, `top`, `complement`, `extendBy`, `reduceBy` and
+the same-domain meet and join of info; what differs between them stays in the
+fragment: `merge`, the formulas and the interpretations.
+
 Each system provides a dynamic interpretation `evalDyn` and a static one
 `evalStatic`. In the PLA fragments they are equivalent given `merge`. In the
 EDPL fragments they are Strawson-equivalent given `/\` (`evalStatic` is total,
@@ -47,6 +54,10 @@ cabal run EDPL # or: EEDPL / SEDPL / PLA / PLASafe
 ```bash
 cabal repl EDPL # or: EEDPL / SEDPL / PLA / PLASafe
 ```
+
+`cabal repl` compiles to optimised object code (`-fobject-code -O2` are in the
+cabal file's `ghc-options`), so it is the way to explore a module
+interactively. For a quick interpreted look, `ghci -isrc src/EEDPL.hs`.
 
 The QuickCheck suite for EEDPL (Strawson and merge equivalence, lattice laws,
 syntactic vs. semantic free variables):

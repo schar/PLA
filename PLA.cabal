@@ -7,6 +7,7 @@ common defaults
   ghc-options:
     -Wall
     -O2
+    -fobject-code
 
   default-extensions:
     AllowAmbiguousTypes
@@ -31,6 +32,7 @@ executable EDPL
   import: defaults
   hs-source-dirs: src
   main-is: EDPL.hs
+  other-modules: Shared
   ghc-options:
     -main-is
     EDPL
@@ -39,6 +41,7 @@ executable EEDPL
   import: defaults
   hs-source-dirs: src
   main-is: EEDPL.hs
+  other-modules: Shared
   ghc-options:
     -main-is
     EEDPL
@@ -47,6 +50,7 @@ executable PLA
   import: defaults
   hs-source-dirs: src
   main-is: PLA.hs
+  other-modules: Shared
   ghc-options:
     -main-is
     PLA
@@ -67,7 +71,7 @@ test-suite eedpl-tests
     src
 
   main-is: EEDPLSpec.hs
-  other-modules: EEDPL
+  other-modules: EEDPL Shared
   build-depends:
     QuickCheck
 
@@ -75,6 +79,7 @@ executable SEDPL
   import: defaults
   hs-source-dirs: src
   main-is: SEDPL.hs
+  other-modules: Shared
   ghc-options:
     -main-is
     SEDPL

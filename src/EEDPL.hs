@@ -1,4 +1,6 @@
-module EEDPL where
+{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
+
+module EEDPL (module EEDPL, module Shared) where
 
 import Control.Exception (ErrorCall (..), evaluate, try)
 import Control.Monad (replicateM)
@@ -6,6 +8,7 @@ import Data.Either (isRight)
 import Data.List (isPrefixOf, subsequences)
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Shared
 
 -- Basic data and types
 
@@ -26,67 +29,39 @@ type G = M.Map Var E
 -- | A State is a domain and an info state. The domain is strict so that a
 -- novelty violation in @merge@'s @d <+> d'@ is raised when the state is built,
 -- not when its domain happens to be read.
-data State = State {dom :: !Domain, info :: Info}
+data State = State !Vars (G -> Bool)
 
 -- | Domains are sets of variables.
-type Domain = S.Set Var
+type Vars = S.Set Var
 
--- | Info states are properties of assignments.
-type Info = G -> Bool
+instance Domain Vars where
+  zero = S.empty
+  widen = S.union
+  narrow = S.intersection
+  diff = (S.\\)
 
--- Operations on and in states
+instance System State where
+  type Dom State = Vars
+  dom (State d _) = d
+  top d = State d (const True)
+  complement (State d f) = State d (not . f)
+  extendBy = flip (foldl' addRef)
 
--- | Add two domains.
-domPlus :: Domain -> Domain -> Domain
-domPlus = S.union
-
--- | Subtract two domains.
-domDiff :: Domain -> Domain -> Domain
-domDiff = (S.\\)
-
--- | The empty domain.
-domZero :: Domain
-domZero = S.empty
-
--- | The informational meet of two domains.
-domMeet :: Domain -> Domain -> Domain
-domMeet = S.union
-
--- | The informational join of two domains.
-domJoin :: Domain -> Domain -> Domain
-domJoin = S.intersection
-
--- | The informational meet of two info contents.
-infoMeet :: Info -> Info -> Info
-infoMeet = liftA2 (&&)
-
--- | The informational join of two info contents.
-infoJoin :: Info -> Info -> Info
-infoJoin = liftA2 (||)
-
--- | Tautologous state over a domain.
-top :: Domain -> State
-top d = State d (const True)
-
--- | Maximal/contradictory state over a domain.
-bottom :: Domain -> State
-bottom d = complement (top d)
-
--- | The initial info state: empty domain, trivial info content.
-initState :: State
-initState = top domZero
+  -- @M.union@ is left-biased, so @flip M.union@ lets the witness overwrite: total.
+  reduceBy = closeWith (flip M.union)
+  infoMeet (State d s) (State _ t) = State d (liftA2 (&&) s t)
+  infoJoin (State d s) (State _ t) = State d (liftA2 (||) s t)
 
 -- | Add a referent to a state
 addRef :: State -> Var -> State
-addRef (State d s) v =
-  State (d `domPlus` S.singleton v) (s . M.delete v)
+addRef (State d s) v = State (S.insert v d) (s . M.delete v)
 
 -- | Existentially close a domain, one variable at a time: some witness for it,
 -- joined to the input by @u@ (the talk's @ij@), satisfies the state.
-closeWith :: (G -> G -> G) -> Domain -> State -> State
+closeWith :: (G -> G -> G) -> Vars -> State -> State
 closeWith u = flip (foldl' close)
   where
-    close (State d s) v = State (d `domDiff` S.singleton v) (\i -> any (\x -> s $! i `u` M.singleton v x) univ) -- $!: a raising @u@ must fire even if @s@ never reads the join
+    close (State d s) v = State (S.delete v d) (\i -> any (\x -> s $! i `u` M.singleton v x) univ) -- $!: a raising @u@ must fire even if @s@ never reads the join
 
 -- | Delete a referent from a state (existential projection).
 delRef :: State -> Var -> State
@@ -97,7 +72,7 @@ delRef s v = reduceBy (S.singleton v) s
 class DisjointUnion a where
   (<+>) :: a -> a -> a
 
-instance DisjointUnion Domain where
+instance DisjointUnion Vars where
   d <+> e
     | S.disjoint d e = S.union d e
     | otherwise = error ("Novelty violation: " ++ show (S.toList (S.intersection d e)))
@@ -107,15 +82,6 @@ instance DisjointUnion G where
     | M.disjoint i j = M.union i j
     | otherwise = error ("Novelty violation: " ++ show (M.keys (M.intersection i j)))
 
--- | Extend a state to a larger domain
-extendBy :: Domain -> State -> State
-extendBy = flip (foldl' addRef)
-
--- | Restrict a state to a smaller domain. @M.union@ is left-biased, so
--- @flip M.union@ lets the witness overwrite: total.
-reduceBy :: Domain -> State -> State
-reduceBy = closeWith (flip M.union)
-
 -- | State merge, given disjoint domains. Analogous to PLA: the left state sees
 -- @e@ minus the right state's referents (cf. PLA's @drop n@).
 merge :: State -> State -> State
@@ -123,24 +89,10 @@ merge (State d s) (State d' t) = State (d <+> d') (\e -> s (M.withoutKeys e d') 
 
 -- | Symmetric / Zeevat merge
 mergeSymm :: State -> State -> State
-mergeSymm (State d s) (State d' t) = State (d `domPlus` d') (s `infoMeet` t)
-
--- | State intersection, given same domains.
-(@@) :: State -> State -> State
-State m f @@ State n g
-  | m == n = State m (f `infoMeet` g)
-  | otherwise = error "mismatched @@ domains; this shouldn't happen"
-
--- | State complementation (involutive).
-complement :: State -> State
-complement (State d f) = State d (not . f)
-
--- | Subtract two states by restricting the second to the domain of the first.
-(\\) :: State -> State -> State
-s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
+mergeSymm (State d s) (State d' t) = State (S.union d d') (liftA2 (&&) s t)
 
 -- | All total assignments over a domain.
-assignments :: Domain -> [G]
+assignments :: Vars -> [G]
 assignments d = map (M.fromList . zip vs) (replicateM (length vs) univ)
   where
     vs = S.toList d
@@ -161,27 +113,6 @@ satElim vars (State d f) = filter f partials
           d `S.isSubsetOf` S.fromList sub,
           vals <- replicateM (length sub) univ
       ]
-
--- | Lattice operations with the usual axioms.
-class Lattice a where
-  -- | join
-  (\/) :: a -> a -> a
-  -- | meet
-  (/\) :: a -> a -> a
-
--- | States form a lattice.
-instance Lattice State where
-  s /\ t =
-    let d = dom s `domMeet` dom t
-        sE = info (extendBy (d `domDiff` dom s) s)
-        tE = info (extendBy (d `domDiff` dom t) t)
-     in State d (sE `infoMeet` tE)
-
-  s \/ t =
-    let d = dom s `domJoin` dom t
-        sR = info (reduceBy (dom s `domDiff` d) s)
-        tR = info (reduceBy (dom t `domDiff` d) t)
-     in State d (sR `infoJoin` tR)
 
 -- Formulas and dynamic and static interpretations
 
@@ -225,12 +156,12 @@ evalStatic (And p q) = evalStatic p /\ evalStatic q
 -- We add: evalDyn phi s == s `merge` evalStatic' phi (equivalence)
 
 -- | Static content of a formula, *with* novelty and familiarity, following
--- @PLA@. It is crucial that @info s@ is a partial @G -> Bool@ function, and so
+-- @PLA@. It is crucial that a state's info is a partial @G -> Bool@, and so
 -- this can't be replicated in @EDPL@. Familiarity is the partiality of
 -- @resolve@; novelty that of @<+>@, at domains in @merge@ and at assignments
 -- under negation.
 evalStatic' :: Form -> State
-evalStatic' (Rel r vs) = State domZero (r . resolve vs)     -- familiarity from @resolve@
+evalStatic' (Rel r vs) = State zero (r . resolve vs)     -- familiarity from @resolve@
 evalStatic' (Ex v) = top (S.singleton v)
 evalStatic' (Not p) = let s = evalStatic' p in complement (closeWith (<+>) (dom s) s) -- novelty from @<+>@
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
@@ -241,7 +172,7 @@ evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @mer
 -- symmetric merge. Total, with no novelty or familiarity conditions, and
 -- Strawson equivalent to @evalDyn@ via @mergeSymm@.
 evalStatic'' :: Form -> State
-evalStatic'' (Rel r vs) = State domZero (\g -> all (`M.member` g) vs && r (resolve vs g)) -- the guard makes this total; @resolve@ alone is partial
+evalStatic'' (Rel r vs) = State zero (\g -> all (`M.member` g) vs && r (resolve vs g)) -- the guard makes this total; @resolve@ alone is partial
 evalStatic'' (Ex v) = top (S.singleton v)
 evalStatic'' (Not p) = let s = evalStatic'' p in complement (reduceBy (dom s) s)
 evalStatic'' (And p q) = evalStatic'' p `mergeSymm` evalStatic'' q
@@ -249,24 +180,24 @@ evalStatic'' (And p q) = evalStatic'' p `mergeSymm` evalStatic'' q
 -- | Free variables, found semantically: the variables common to every domain
 -- on which the update is defined. Definedness depends only on the domain, so
 -- the probe states carry no assignments.
-fvSem :: [Var] -> (State -> Either err State) -> Domain
+fvSem :: [Var] -> (State -> Either err State) -> Vars
 fvSem vars upd =
   foldr S.intersection (S.fromList vars)
     [d | d <- map S.fromList (subsequences vars), isRight (upd (State d (const False)))]
 
 -- | Syntactically finding free variables.
-fvSyn :: Form -> Domain
+fvSyn :: Form -> Vars
 fvSyn (Rel _ vs) = S.fromList vs
-fvSyn (Ex _)     = domZero
+fvSyn (Ex _)     = S.empty
 fvSyn (Not p)    = fvSyn p
-fvSyn (And p q)  = fvSyn p `domPlus` (fvSyn q `domDiff` ivSyn p)
+fvSyn (And p q)  = fvSyn p `S.union` (fvSyn q S.\\ ivSyn p)
 
 -- | Syntactically finding introduced variables.
-ivSyn :: Form -> Domain
-ivSyn (Rel _ _)  = domZero
+ivSyn :: Form -> Vars
+ivSyn (Rel _ _)  = S.empty
 ivSyn (Ex v)     = S.singleton v
-ivSyn (Not _)    = domZero
-ivSyn (And p q)  = ivSyn p `domPlus` ivSyn q
+ivSyn (Not _)    = S.empty
+ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
 
 -- Examples/tests.
 

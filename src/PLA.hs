@@ -1,6 +1,9 @@
-module PLA where
+{-# LANGUAGE TypeFamilies #-}
+
+module PLA (module PLA, module Shared) where
 
 import Control.Monad (replicateM)
+import Shared
 
 -- Basic data and types
 
@@ -18,101 +21,38 @@ type Stack = [E]
 
 -- States and operations on states
 
--- | States are pairs of a length/domain and a set of stacks representing an
--- information state over that domain.
-data State = State {dom :: Length, info :: Stack -> Bool}
+-- | A state is a length and a property of stacks.
+data State = State Length (Stack -> Bool)
 
 -- | Length of a state. NB: *not* the length of its stacks, but a contract
 -- representing how many new referents are introduced. (Hence, represents a
 -- lower bound on the length of the state's stacks.)
 type Length = Int
 
-domPlus :: Length -> Length -> Length
-domPlus = (+)
+instance System State where
+  type Dom State = Length
+  dom (State n _) = n
+  top n = State n (const True)
+  complement (State n f) = State n (not . f)
 
-domDiff :: Length -> Length -> Length
-domDiff = (-)
+  -- @k@ new leading positions are unconstrained, so drop them.
+  -- == (`merge` top k)
+  extendBy k (State n f)
+    | k >= 0 = State (n + k) (f . drop k)
+    | otherwise = error "impossible extendBy; this shouldn't happen"
 
-domZero :: Length
-domZero = 0
+  -- Existentially quantify over @k@ leading positions.
+  reduceBy k (State n f)
+    | k <= n = State (n - k) (\e -> any (\e' -> f (e' ++ e)) (replicateM k univ))
+    | otherwise = error "impossible reduceBy; this shouldn't happen"
 
-domMeet :: Length -> Length -> Length
-domMeet = max
-
-domJoin :: Length -> Length -> Length
-domJoin = min
-
-infoMeet :: (Stack -> Bool) -> (Stack -> Bool) -> Stack -> Bool
-infoMeet f g e = f e && g e
-
-infoJoin:: (Stack -> Bool) -> (Stack -> Bool) -> Stack -> Bool
-infoJoin f g e = f e || g e
-
--- | Tautologous state of length @n@.
-top :: Length -> State
-top n = State n (const True)
-
--- | Contradictory state of length @n@.
-bottom :: Length -> State
-bottom n = complement (top n)
-
--- | Empty/initial state.
-initState :: State
-initState = top domZero
-
--- | Extend to a larger domain: @k@ new leading positions are unconstrained,
---   so we simply drop them before applying the original function.
-extendBy :: Length -> State -> State
-extendBy k (State n f)
-  | k >= domZero = State (n `domPlus` k) (f . drop k)
-  | otherwise = error "impossible extendBy; this shouldn't happen"
--- == (`merge` top k)
-
--- | Restrict to a smaller domain: existentially quantify over @k@ positions.
-reduceBy :: Length -> State -> State
-reduceBy k (State n f)
-  | k <= n = State (n - k) (\e -> any (\e' -> f (e' ++ e)) (replicateM k univ))
-  | otherwise = error "impossible reduceBy; this shouldn't happen"
+  infoMeet (State n f) (State _ g) = State n (liftA2 (&&) f g)
+  infoJoin (State n f) (State _ g) = State n (liftA2 (||) f g)
 
 -- | State merge
 merge :: State -> State -> State
-merge (State m f) (State n g) = State (m `domPlus` n) (\e -> f (drop n e) && g e)
-  -- == State (m `domPlus` n) (f . drop n) @@ State (m `domPlus` n) g
-
--- | State intersection, same domains.
-(@@) :: State -> State -> State
-State m f @@ State n g
-  | m == n = State m (f `infoMeet` g)
-  | otherwise = error "mismatched @@ domains; this shouldn't happen"
-
--- | Complement: negate the characteristic function. Involutive.
-complement :: State -> State
-complement (State n f) = State n (not . f)
-
--- | State difference. @reduceBy@ will throw error if @dom s > dom t@.
-(\\) :: State -> State -> State
-s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
-
--- | Lattice operations with the usual axioms
-class Lattice a where
-  -- | join
-  (\/) :: a -> a -> a
-  -- | meet
-  (/\) :: a -> a -> a
-
--- | States form a lattice
-instance Lattice State where
-  s /\ t =
-    let d = dom s `domMeet` dom t
-        sE = info (extendBy (d `domDiff` dom s) s)
-        tE = info (extendBy (d `domDiff` dom t) t)
-     in State d (sE `infoMeet` tE)
-
-  s \/ t =
-    let d = dom s `domJoin` dom t
-        sR = info (reduceBy (dom s `domDiff` d) s)
-        tR = info (reduceBy (dom t `domDiff` d) t)
-     in State d (sR `infoJoin` tR)
+merge (State m f) (State n g) = State (m + n) (\e -> f (drop n e) && g e)
+  -- == State (m + n) (f . drop n) @@ State (m + n) g
 
 -- Formulas and dynamic and static interpretations
 
@@ -129,7 +69,7 @@ resolve vs e = map (\(Var i) -> e !! i) vs
 
 -- | Static content of a formula.
 evalStatic :: Form -> State
-evalStatic (Rel r vs) = State domZero (r . resolve vs)
+evalStatic (Rel r vs) = State zero (r . resolve vs)
 evalStatic Ex = top 1
 evalStatic (Not p) = let s = evalStatic p in complement (reduceBy (dom s) s)
 evalStatic (And p q) = merge (evalStatic p) (evalStatic q)

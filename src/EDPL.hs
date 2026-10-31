@@ -1,9 +1,12 @@
-module EDPL where
+{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
+
+module EDPL (module EDPL, module Shared) where
 
 import Data.Either (isRight)
 import Data.List (subsequences)
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Shared
 
 -- Basic data and types
 
@@ -22,105 +25,36 @@ type G = M.Map Var E
 
 -- States and operations on states
 
--- | A State is a domain and a set of partial assignments over that domain
-data State = State {dom :: Domain, info :: Info}
+-- | A State is a domain and a set of assignments over that domain.
+data State = State Vars (S.Set G)
   deriving (Eq, Show)
 
--- | Domains are sets of variables
-type Domain = S.Set Var
+-- | Domains are sets of variables.
+type Vars = S.Set Var
 
--- | Info states are sets of assignments
-type Info = S.Set G
+instance Domain Vars where
+  zero = S.empty
+  widen = S.union
+  narrow = S.intersection
+  diff = (S.\\)
 
-domPlus :: Domain -> Domain -> Domain
-domPlus = S.union
-
-domDiff :: Domain -> Domain -> Domain
-domDiff = (S.\\)
-
-domZero :: Domain
-domZero = S.empty
-
-domMeet :: Domain -> Domain -> Domain
-domMeet = S.union
-
-domJoin :: Domain -> Domain -> Domain
-domJoin = S.intersection
-
-infoMeet :: Info -> Info -> Info
-infoMeet s t = s `S.intersection` t
-
-infoJoin :: Info -> Info -> Info
-infoJoin s t = s `S.union` t
+instance System State where
+  type Dom State = Vars
+  dom (State d _) = d
+  top = foldl' addRef (State S.empty (S.singleton M.empty))
+  complement (State d s) = let State _ t = top d in State d (t S.\\ s)
+  extendBy d s = foldl' addRef s d
+  reduceBy d t = foldl' delRef t d
+  infoMeet (State d s) (State _ t) = State d (S.intersection s t)
+  infoJoin (State d s) (State _ t) = State d (S.union s t)
 
 -- | Add a referent to a state
 addRef :: State -> Var -> State
-addRef (State d s) v =
-  State
-    (d `domPlus` S.singleton v)
-    (S.fromList [M.insert v x g | g <- S.toList s, x <- univ])
+addRef (State d s) v = State (S.insert v d) (S.fromList [M.insert v x g | g <- S.toList s, x <- univ])
 
 -- | Delete a referent from a state
 delRef :: State -> Var -> State
-delRef (State d s) v =
-  State
-    (d `domDiff` S.singleton v)
-    (S.map (M.delete v) s)
-
--- | Tautologous state over a domain
-top :: Domain -> State
-top = foldl' addRef initState
-
--- | Maximal/contradictory state over a domain
-bottom :: Domain -> State
-bottom d = complement (top d)
-
--- | The initial info state: empty domain, singleton state with an empty assignment
-initState :: State
-initState = State domZero (S.singleton M.empty)
-
--- | Extend a state to a larger domain
-extendBy :: Domain -> State -> State
-extendBy d s = foldl' addRef s d
-
--- | Restrict a state to a smaller domain
-reduceBy :: Domain -> State -> State
-reduceBy d t = foldl' delRef t d
-
--- | State intersection, same domains.
-(@@) :: State -> State -> State
-State m s @@ State n t
-  | m == n = State m (s `infoMeet` t)
-  | otherwise = error "mismatched @@ domains; this shouldn't happen"
-
--- | State complementation; involutive
-complement :: State -> State
-complement (State d s) = State d (info (top d) S.\\ s)
-
--- | Subtract two states by restricting the second to the domain of the first
-(\\) :: State -> State -> State
-s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
-
--- | Lattice operations with the usual axioms
-class Lattice a where
-  -- | join
-  (\/) :: a -> a -> a
-  -- | meet
-  (/\) :: a -> a -> a
-
--- | States form a natural lattice
-instance Lattice State where
-  s /\ t =
-    let d = dom s `domMeet` dom t
-        sE = info (extendBy (d `domDiff` dom s) s)
-        tE = info (extendBy (d `domDiff` dom t) t)
-     in State d (sE `infoMeet` tE)
-
-  s \/ t =
-    let d = dom s `domJoin` dom t
-        sR = info (reduceBy (dom s `domDiff` d) s)
-        tR = info (reduceBy (dom t `domDiff` d) t)
-     in State d (sR `infoJoin` tR)
+delRef (State d s) v = State (S.delete v d) (S.map (M.delete v) s)
 
 -- Formulas and dynamic and static interpretations
 
@@ -139,7 +73,7 @@ resolve vs g = map (g M.!) vs
 evalStatic :: Form -> State
 evalStatic (Rel r vs) =
   let d = S.fromList vs
-      s = info (top d)
+      State _ s = top d
    in State d (S.filter (r . resolve vs) s)
 evalStatic (Ex v) = top (S.singleton v)
 evalStatic (Not p) = complement prej
@@ -168,13 +102,13 @@ evalDyn (And p q) s = evalDyn p s >>= evalDyn q
 -- Dekker 1996 proves:
 -- when defined, evalDyn phi s == s /\ evalStatic phi
 
-fvSyn :: Form -> Domain
+fvSyn :: Form -> Vars
 fvSyn (Rel _ vs) = S.fromList vs
 fvSyn (Ex _)     = S.empty
 fvSyn (Not p)    = fvSyn p
 fvSyn (And p q)  = fvSyn p `S.union` (fvSyn q `S.difference` ivSyn p)
 
-ivSyn :: Form -> Domain
+ivSyn :: Form -> Vars
 ivSyn (Rel _ _)  = S.empty
 ivSyn (Ex v)     = S.singleton v
 ivSyn (Not _)    = S.empty
@@ -183,7 +117,7 @@ ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
 -- | Free variables, found semantically: the variables common to every domain
 -- on which the update is defined. Definedness depends only on the domain, so
 -- the probe states carry no assignments.
-fvSem :: [Var] -> (State -> Either err State) -> Domain
+fvSem :: [Var] -> (State -> Either err State) -> Vars
 fvSem vars upd =
   foldr S.intersection (S.fromList vars)
     [d | d <- map S.fromList (subsequences vars), isRight (upd (State d S.empty))]
