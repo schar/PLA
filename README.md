@@ -24,8 +24,10 @@ Each system provides a dynamic interpretation `evalDyn` and a static one
 `evalStatic`. In the PLA fragments they are equivalent given `merge`; in the
 EDPL fragments, Strawson-equivalent given `/\` (`evalStatic` is total,
 `evalDyn` is not). EEDPL and SEDPL add `evalStatic'`, exactly equivalent to
-`evalDyn` given `merge`, and `evalStatic''`, a total variant with Zeevat's
-symmetric merge. What the fragments share is in `src/Shared.hs`.
+`evalDyn` given `merge`. EEDPL also has `evalStatic''`, a total variant with
+Zeevat's symmetric merge that is Strawson-equivalent to `evalDyn`; the same
+definition in SEDPL fails once a variable is reintroduced. What the four
+value-level fragments share is in `src/Shared.hs`; PLASafe stands alone.
 
 ## Build & run
 
