@@ -28,58 +28,52 @@ common defaults
 
   default-language: Haskell2010
 
-executable EDPL
+library
   import: defaults
   hs-source-dirs: src
-  main-is: EDPL.hs
-  other-modules: Shared
-  ghc-options:
-    -main-is
+  exposed-modules:
+    Shared
+    PLA
+    PLASafe
     EDPL
+    EEDPL
+    SEDPL
+
+executable EDPL
+  import: defaults
+  hs-source-dirs: app/EDPL
+  main-is: Main.hs
+  build-depends: PLA
 
 executable EEDPL
   import: defaults
-  hs-source-dirs: src
-  main-is: EEDPL.hs
-  other-modules: Shared
-  ghc-options:
-    -main-is
-    EEDPL
+  hs-source-dirs: app/EEDPL
+  main-is: Main.hs
+  build-depends: PLA
 
 executable PLA
   import: defaults
-  hs-source-dirs: src
-  main-is: PLA.hs
-  other-modules: Shared
-  ghc-options:
-    -main-is
-    PLA
+  hs-source-dirs: app/PLA
+  main-is: Main.hs
+  build-depends: PLA
 
 executable PLASafe
   import: defaults
-  hs-source-dirs: src
-  main-is: PLASafe.hs
-  ghc-options:
-    -main-is
-    PLASafe
+  hs-source-dirs: app/PLASafe
+  main-is: Main.hs
+  build-depends: PLA
+
+executable SEDPL
+  import: defaults
+  hs-source-dirs: app/SEDPL
+  main-is: Main.hs
+  build-depends: PLA
 
 test-suite eedpl-tests
   import: defaults
   type: exitcode-stdio-1.0
-  hs-source-dirs:
-    test
-    src
-
+  hs-source-dirs: test
   main-is: EEDPLSpec.hs
-  other-modules: EEDPL Shared
   build-depends:
+    PLA,
     QuickCheck
-
-executable SEDPL
-  import: defaults
-  hs-source-dirs: src
-  main-is: SEDPL.hs
-  other-modules: Shared
-  ghc-options:
-    -main-is
-    SEDPL

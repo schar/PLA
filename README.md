@@ -28,7 +28,9 @@ of referents and a `System` class for states over them, from which `bottom`,
 `initState`, `@@`, `\\`, `/\` and `\/` are defined once. Each fragment
 supplies its carrier types, `top`, `complement`, `extendBy`, `reduceBy` and
 the same-domain meet and join of info; what differs between them stays in the
-fragment: `merge`, the formulas and the interpretations.
+fragment: `merge`, the formulas and the interpretations. The modules form a
+library; each executable is a one-line `app/<Name>/Main.hs`, so every source
+file belongs to one cabal component, which is what HLS needs.
 
 Each system provides a dynamic interpretation `evalDyn` and a static one
 `evalStatic`. In the PLA fragments they are equivalent given `merge`. In the
@@ -52,12 +54,13 @@ cabal run EDPL # or: EEDPL / SEDPL / PLA / PLASafe
 ```
 
 ```bash
-cabal repl EDPL # or: EEDPL / SEDPL / PLA / PLASafe
+cabal repl
 ```
 
-`cabal repl` compiles to optimised object code (`-fobject-code -O2` are in the
-cabal file's `ghc-options`), so it is the way to explore a module
-interactively. For a quick interpreted look, `ghci -isrc src/EEDPL.hs`.
+`cabal repl` loads the library, all six modules, as optimised object code
+(`-fobject-code -O2` are in the cabal file's `ghc-options`); `:m EEDPL`
+brings a module's exports into scope. For a quick interpreted look,
+`ghci -isrc src/EEDPL.hs`.
 
 The QuickCheck suite for EEDPL (Strawson and merge equivalence, lattice laws,
 syntactic vs. semantic free variables):
