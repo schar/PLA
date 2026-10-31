@@ -1,3 +1,6 @@
+{-# LANGUAGE AllowAmbiguousTypes, BlockArguments, DataKinds, GADTs #-}
+{-# LANGUAGE PolyKinds, ScopedTypeVariables, TypeApplications, TypeOperators #-}
+
 module PLASafe where
 
 import Control.Monad  (replicateM)

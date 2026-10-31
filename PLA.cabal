@@ -9,19 +9,6 @@ common defaults
     -O2
     -fobject-code
 
-  default-extensions:
-    AllowAmbiguousTypes
-    BlockArguments
-    DataKinds
-    FlexibleInstances
-    GADTs
-    GeneralizedNewtypeDeriving
-    PartialTypeSignatures
-    PolyKinds
-    ScopedTypeVariables
-    TypeApplications
-    TypeOperators
-
   build-depends:
     base >=4.20 && <4.23,
     containers,
@@ -77,3 +64,10 @@ test-suite eedpl-tests
   build-depends:
     PLA,
     QuickCheck
+
+test-suite examples
+  import: defaults
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Examples.hs
+  build-depends: PLA
