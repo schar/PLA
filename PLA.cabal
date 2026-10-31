@@ -70,3 +70,11 @@ test-suite eedpl-tests
   other-modules: EEDPL
   build-depends:
     QuickCheck
+
+executable SEDPL
+  import: defaults
+  hs-source-dirs: src
+  main-is: SEDPL.hs
+  ghc-options:
+    -main-is
+    SEDPL

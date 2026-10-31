@@ -5,7 +5,7 @@ first-order interpretations following Dekker
 ([1996](https://doi.org/10.1007/BF00628200),
 [2002](https://doi.org/10.1023/A:1017575313451)).
 
-Four perspectives:
+Five perspectives:
 
 - **EDPL** — Assignments as maps. States as sets of assignments tagged with a
 common domain. Ill-formed updates (an unfamiliar variable, a non-novel
@@ -18,6 +18,10 @@ tagged with their common length. Ill-formed updates are not checked; an
 out-of-range pronoun errors when a state is materialized.
 - **PLASafe** — Stack-based assignments with type-level domain and extension
 indices, ensuring well-formedness at compile time.
+- **SEDPL** — EDPL over referent systems (Vermeulen's sequence semantics): a
+variable points to a stack of values, so reintroducing it shadows the old
+value rather than clashing. No novelty condition; identical to EDPL wherever
+EDPL is defined, and `evalDyn` is exactly `merge` with `evalStatic'` everywhere.
 
 Each system provides a dynamic interpretation `evalDyn` and a static one
 `evalStatic`. In the PLA fragments they are equivalent given `merge`. In the
@@ -37,11 +41,11 @@ Requires GHC 9.10 or later ([ghcup](https://www.haskell.org/ghcup/)).
 
 ```bash
 cabal build all
-cabal run EDPL # or: EEDPL / PLA / PLASafe
+cabal run EDPL # or: EEDPL / SEDPL / PLA / PLASafe
 ```
 
 ```bash
-cabal repl EDPL # or: EEDPL / PLA / PLASafe
+cabal repl EDPL # or: EEDPL / SEDPL / PLA / PLASafe
 ```
 
 The QuickCheck suite for EEDPL (Strawson and merge equivalence, lattice laws,
