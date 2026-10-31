@@ -23,8 +23,10 @@ newtype Var = Var Char
 -- | Partial variable assignments.
 type G = M.Map Var E
 
--- | A State is a domain and an info state.
-data State = State {dom :: Domain, info :: Info}
+-- | A State is a domain and an info state. The domain is strict so that a
+-- novelty violation in @merge@'s @d <+> d'@ is raised when the state is built,
+-- not when its domain happens to be read.
+data State = State {dom :: !Domain, info :: Info}
 
 -- | Domains are sets of variables.
 type Domain = S.Set Var
@@ -90,12 +92,20 @@ closeWith u = flip (foldl' close)
 delRef :: State -> Var -> State
 delRef s v = reduceBy (S.singleton v) s
 
--- | Union of assignments with disjoint domains (the talk's @ij@). Raises on
--- overlap: a variable valued on both sides was introduced twice (novelty).
-(<+>) :: G -> G -> G
-i <+> j
-  | M.disjoint i j = M.union i j
-  | otherwise = error ("Novelty violation: " ++ show (M.keys (M.intersection i j)))
+-- | Disjoint union, raising on overlap: novelty, at domains (in @merge@) and
+-- at assignments (under negation, the talk's @ij@).
+class Novel a where
+  (<+>) :: a -> a -> a
+
+instance Novel Domain where
+  d <+> e
+    | S.disjoint d e = S.union d e
+    | otherwise = error ("Novelty violation: " ++ show (S.toList (S.intersection d e)))
+
+instance Novel G where
+  i <+> j
+    | M.disjoint i j = M.union i j
+    | otherwise = error ("Novelty violation: " ++ show (M.keys (M.intersection i j)))
 
 -- | Extend a state to a larger domain
 extendBy :: Domain -> State -> State
@@ -109,9 +119,7 @@ reduceBy = closeWith (\i j -> M.union j i)
 -- | State merge, given disjoint domains. Analogous to PLA: the left state sees
 -- @e@ minus the right state's referents (cf. PLA's @drop n@).
 merge :: State -> State -> State
-merge (State d s) (State d' t)
-  | d `S.disjoint` d' = State (d `domPlus` d') (\e -> s (M.withoutKeys e d') && t e)
-  | otherwise = error "Merge: overlapping domains (novelty)"
+merge (State d s) (State d' t) = State (d <+> d') (\e -> s (M.withoutKeys e d') && t e)
 
 -- | Symmetric / Zeevat merge
 mergeSymm :: State -> State -> State
@@ -219,7 +227,8 @@ evalStatic (And p q) = evalStatic p /\ evalStatic q
 -- | Static content of a formula, *with* novelty and familiarity, following
 -- @PLA@. It is crucial that @info s@ is a partial @G -> Bool@ function, and so
 -- this can't be replicated in @EDPL@. Familiarity is the partiality of
--- @resolve@; novelty that of @<+>@ (under negation) and @merge@.
+-- @resolve@; novelty that of @<+>@, at domains in @merge@ and at assignments
+-- under negation.
 evalStatic' :: Form -> State
 evalStatic' (Rel r vs) = State domZero (r . resolve vs)     -- familiarity from @resolve@
 evalStatic' (Ex v) = top (S.singleton v)
