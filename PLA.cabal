@@ -7,7 +7,6 @@ common defaults
   ghc-options:
     -Wall
     -O2
-    -fobject-code
 
   build-depends:
     base >=4.20 && <4.23,
