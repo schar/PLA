@@ -1,7 +1,7 @@
 module EDPL where
 
 import Data.Either (isRight)
-import Data.Foldable (foldl')
+import Data.List (subsequences)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -124,7 +124,7 @@ instance Lattice State where
 
 -- Formulas and dynamic and static interpretations
 
--- | Variable-free first-order formulas with random assignment.
+-- | First-order formulas with random assignment.
 data Form
   = Rel ([E] -> Bool) [Var]
   | Ex Var
@@ -146,23 +146,27 @@ evalStatic (Not p) = complement prej
   where
     pSem = evalStatic p
     vars = S.toList (dom pSem)
-    prej = bottom (fvSem vars (evalDPL p)) \/ pSem
+    prej = bottom (fvSem vars (evalDyn p)) \/ pSem
 evalStatic (And p q) = evalStatic p /\ evalStatic q
 
+-- No @evalStatic''@ here (see @EEDPL@). A @dom@ holding only *introduced*
+-- variables needs info that also mentions free variables, i.e. a predicate on
+-- assignments. Sets of maps keyed exactly by @dom@ can't express that.
+
 -- | Dynamic evaluation: update an state with a formula.
-evalDPL :: Form -> State -> Either String State
-evalDPL (Rel r vs) (State d s)
+evalDyn :: Form -> State -> Either String State
+evalDyn (Rel r vs) (State d s)
   | S.fromList vs `S.isSubsetOf` d =
       Right (State d (S.filter (r . resolve vs) s))
   | otherwise = Left "Un-familiar"
-evalDPL (Ex v) s@(State d _)
+evalDyn (Ex v) s@(State d _)
   | v `S.member` d = Left "Un-novel"
   | otherwise = Right (addRef s v)
-evalDPL (Not p) s = (s \\) <$> evalDPL p s
-evalDPL (And p q) s = evalDPL p s >>= evalDPL q
+evalDyn (Not p) s = (s \\) <$> evalDyn p s
+evalDyn (And p q) s = evalDyn p s >>= evalDyn q
 
 -- Dekker 1996 proves:
--- when defined, evalDPL phi s == s /\ evalStatic phi
+-- when defined, evalDyn phi s == s /\ evalStatic phi
 
 fvSyn :: Form -> Domain
 fvSyn (Rel _ vs) = S.fromList vs
@@ -176,18 +180,13 @@ ivSyn (Ex v)     = S.singleton v
 ivSyn (Not _)    = S.empty
 ivSyn (And p q)  = ivSyn p `S.union` ivSyn q
 
+-- | Free variables, found semantically: the variables common to every domain
+-- on which the update is defined. Definedness depends only on the domain, so
+-- the probe states carry no assignments.
 fvSem :: [Var] -> (State -> Either err State) -> Domain
-fvSem vars upd = go vars initState (S.fromList vars)
-  where
-    go _ _ acc
-      | S.null acc = acc
-    go [] s acc
-      | isRight (upd s) = acc `S.intersection` dom s
-      | otherwise = acc
-    go (v : vs) s acc =
-      let acc1 = go vs s acc
-          acc2 = go vs (addRef s v) acc1
-       in acc2
+fvSem vars upd =
+  foldr S.intersection (S.fromList vars)
+    [d | d <- map S.fromList (subsequences vars), isRight (upd (State d S.empty))]
 
 -- Examples
 gt :: [E] -> Bool
@@ -201,7 +200,7 @@ ex = And s0 s1
 ey = And s1 s0
 
 test :: Bool
-test = Right (evalStatic ex) == evalDPL ex initState
+test = Right (evalStatic ex) == evalDyn ex initState
 
 main :: IO ()
 main = print test

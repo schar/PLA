@@ -72,7 +72,7 @@ extendBy k (State n f)
 reduceBy :: Length -> State -> State
 reduceBy k (State n f)
   | k <= n = State (n - k) (\e -> any (\e' -> f (e' ++ e)) (replicateM k univ))
-  | otherwise = error "impossible projectBy; this shouldn't happen"
+  | otherwise = error "impossible reduceBy; this shouldn't happen"
 
 -- | State merge
 merge :: State -> State -> State
@@ -135,12 +135,12 @@ evalStatic (Not p) = let s = evalStatic p in complement (reduceBy (dom s) s)
 evalStatic (And p q) = merge (evalStatic p) (evalStatic q)
 
 -- | Dynamic evaluation: update an state with a formula.  Dekker 1996/2002:
--- @evalDPL φ s ≡ s `merge` evalStatic φ@.
-evalDPL :: Form -> State -> State
-evalDPL (Rel r vs) s = s @@ State (dom s) (r . resolve vs)
-evalDPL Ex s = extendBy 1 s
-evalDPL (Not p) s = s \\ evalDPL p s
-evalDPL (And p q) s = evalDPL q (evalDPL p s)
+-- @evalDyn φ s ≡ s `merge` evalStatic φ@.
+evalDyn :: Form -> State -> State
+evalDyn (Rel r vs) s = s @@ State (dom s) (r . resolve vs)
+evalDyn Ex s = extendBy 1 s
+evalDyn (Not p) s = s \\ evalDyn p s
+evalDyn (And p q) s = evalDyn q (evalDyn p s)
 
 -- | Enumerate all satisfying stacks.
 sat :: State -> [Stack]
@@ -160,7 +160,7 @@ ey = And s1 s0
 
 -- | Test the Dekker theorem on @ex@ at @initState@.
 test :: Bool
-test = sat (initState `merge` evalStatic ex) == sat (evalDPL ex initState)
+test = sat (initState `merge` evalStatic ex) == sat (evalDyn ex initState)
 
 main :: IO ()
 main = print test

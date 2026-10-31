@@ -1,9 +1,9 @@
 module EEDPL where
 
+import Control.Exception (ErrorCall (..), evaluate, try)
 import Control.Monad (replicateM)
 import Data.Either (isRight)
-import Data.Foldable (foldl')
-import Data.List (subsequences)
+import Data.List (isPrefixOf, subsequences)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -79,23 +79,38 @@ addRef :: State -> Var -> State
 addRef (State d s) v =
   State (d `domPlus` S.singleton v) (s . M.delete v)
 
--- | Delete a referent from a state
+-- | Existentially close a domain, one variable at a time: some witness for it,
+-- joined to the input by @u@ (the talk's @ij@), satisfies the state.
+closeWith :: (G -> G -> G) -> Domain -> State -> State
+closeWith u = flip (foldl' close)
+  where
+    close (State d s) v = State (d `domDiff` S.singleton v) (\i -> any (\x -> s $! i `u` M.singleton v x) univ) -- $!: a raising @u@ must fire even if @s@ never reads the join
+
+-- | Delete a referent from a state (existential projection).
 delRef :: State -> Var -> State
-delRef (State d s) v =
-  State (d `domDiff` S.singleton v) (\g -> any (\x -> s (M.insert v x g)) univ)
+delRef s v = reduceBy (S.singleton v) s
+
+-- | Union of assignments with disjoint domains (the talk's @ij@). Raises on
+-- overlap: a variable valued on both sides was introduced twice (novelty).
+(<+>) :: G -> G -> G
+i <+> j
+  | M.disjoint i j = M.union i j
+  | otherwise = error ("Novelty violation: " ++ show (M.keys (M.intersection i j)))
 
 -- | Extend a state to a larger domain
 extendBy :: Domain -> State -> State
 extendBy = flip (foldl' addRef)
 
--- | Restrict a state to a smaller domain
+-- | Restrict a state to a smaller domain. The witnesses overwrite, so this is
+-- total.
 reduceBy :: Domain -> State -> State
-reduceBy = flip (foldl' delRef)
+reduceBy = closeWith (\i j -> M.union j i)
 
--- | State merge, given disjoint domains. Analogous to PLA.
+-- | State merge, given disjoint domains. Analogous to PLA: the left state sees
+-- @e@ minus the right state's referents (cf. PLA's @drop n@).
 merge :: State -> State -> State
 merge (State d s) (State d' t)
-  | d `S.disjoint` d' = State (d `domPlus` d') (\e -> s (M.restrictKeys e d) && t e)
+  | d `S.disjoint` d' = State (d `domPlus` d') (\e -> s (M.withoutKeys e d') && t e)
   | otherwise = error "Merge: overlapping domains (novelty)"
 
 -- | Symmetric / Zeevat merge
@@ -116,13 +131,15 @@ complement (State d f) = State d (not . f)
 (\\) :: State -> State -> State
 s \\ t = s @@ complement (reduceBy (dom t `domDiff` dom s) t)
 
--- | Enumerate all satisfying assignments for a state.
-sat :: State -> [G]
-sat (State d f) = filter f assignments
+-- | All total assignments over a domain.
+assignments :: Domain -> [G]
+assignments d = map (M.fromList . zip vs) (replicateM (length vs) univ)
   where
     vs = S.toList d
-    seqs = replicateM (length vs) univ
-    assignments = map (M.fromList . zip vs) seqs
+
+-- | Enumerate all satisfying assignments for a state.
+sat :: State -> [G]
+sat (State d f) = filter f (assignments d)
 
 -- | An alternative perspective on update and context initialization.
 -- Materialization of a state involves realizing every partial assignment
@@ -201,36 +218,32 @@ evalStatic (And p q) = evalStatic p /\ evalStatic q
 
 -- | Static content of a formula, *with* novelty and familiarity, following
 -- @PLA@. It is crucial that @info s@ is a partial @G -> Bool@ function, and so
--- this can't be replicated in @EDPL@. Indefinites and variables kept separate.
+-- this can't be replicated in @EDPL@. Familiarity is the partiality of
+-- @resolve@; novelty that of @<+>@ (under negation) and @merge@.
 evalStatic' :: Form -> State
 evalStatic' (Rel r vs) = State domZero (r . resolve vs)     -- familiarity from @resolve@
 evalStatic' (Ex v) = top (S.singleton v)
-evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
+evalStatic' (Not p) = let s = evalStatic' p in complement (closeWith (<+>) (dom s) s) -- novelty from @<+>@
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
 
 -- | Static content of a formula, like @evalStatic@ but with only *introduced*
 -- variables in a @State@'s @dom@. Allows a more straightforward definition of
 -- negation as the complement of the prejacent, and conjunction in terms of
--- symmetric merge. Still Strawson equivalent to @evalDyn@(?)
+-- symmetric merge. Total, with no novelty or familiarity conditions, and
+-- Strawson equivalent to @evalDyn@ via @mergeSymm@.
 evalStatic'' :: Form -> State
-evalStatic'' (Rel r vs) = State domZero (((S.fromList vs `S.isSubsetOf`) . M.keysSet) `infoMeet` (r . resolve vs))
+evalStatic'' (Rel r vs) = State domZero (\g -> all (`M.member` g) vs && r (resolve vs g)) -- guard first: @resolve@ is partial
 evalStatic'' (Ex v) = top (S.singleton v)
 evalStatic'' (Not p) = let s = evalStatic'' p in complement (reduceBy (dom s) s)
 evalStatic'' (And p q) = evalStatic'' p `mergeSymm` evalStatic'' q
 
--- | Helper function for finding free variables semantically. Needs @Either@.
+-- | Free variables, found semantically: the variables common to every domain
+-- on which the update is defined. Definedness depends only on the domain, so
+-- the probe states carry no assignments.
 fvSem :: [Var] -> (State -> Either err State) -> Domain
-fvSem vars upd = go vars initState (S.fromList vars)
-  where
-    go _ _ acc
-      | S.null acc = acc
-    go [] s acc
-      | isRight (upd s) = acc `S.intersection` dom s
-      | otherwise = acc
-    go (v : vs) s acc =
-      let acc1 = go vs s acc
-          acc2 = go vs (addRef s v) acc1
-       in acc2
+fvSem vars upd =
+  foldr S.intersection (S.fromList vars)
+    [d | d <- map S.fromList (subsequences vars), isRight (upd (State d (const False)))]
 
 -- | Syntactically finding free variables.
 fvSyn :: Form -> Domain
@@ -256,6 +269,10 @@ lt :: [E] -> Bool
 lt [x, y] = x < y
 lt _     = error "arity"
 
+big :: [E] -> Bool
+big [x] = x > 50
+big _   = error "arity"
+
 s0, s1, ex, ey :: Form
 -- | There is an @x@ and there is a @y@.
 s0 = And (Ex (Var 'x')) (Ex (Var 'y'))
@@ -266,13 +283,39 @@ ex = And s0 s1
 -- | Conjoining in cataphoric order.
 ey = And s1 s0
 
+-- | There is an @x@; it is big and there is a @y@. The inner left conjunct has
+-- a free variable and the right one introduces a referent, so @merge@ must
+-- hide only the right conjunct's referents from the left.
+ez :: Form
+ez = And (Ex (Var 'x')) (And (Rel big [Var 'x']) (Ex (Var 'y')))
+
+-- | There are an @x@ and a @y@, @x > y@, and there is no @x@ less than @y@:
+-- the negation reintroduces @x@, violating novelty.
+ew :: Form
+ew = And (And s0 (Rel gt [Var 'x', Var 'y'])) (Not (And (Ex (Var 'x')) (Rel lt [Var 'x', Var 'y'])))
+
 test0 :: Bool
 test0 = Right (sat (evalStatic  ex)) == (sat <$> evalDyn ex initState)
 
 test1 :: Bool
 test1 = Right (sat (evalStatic' ex)) == (sat <$> evalDyn ex initState)
 
+-- | @evalDyn@ rejects @ew@ as un-novel, and @evalStatic'@ raises on it, and on
+-- the atom-free @∃x ∧ ¬∃x@, where nothing inside the negation reads the
+-- joined assignment.
+test2 :: IO Bool
+test2 = do
+  let raises f = either (\(ErrorCall m) -> "Novelty violation" `isPrefixOf` m) (const False) <$> try (evaluate (length (sat (evalStatic' f))))
+  a <- raises ew
+  b <- raises (And (Ex (Var 'x')) (Not (Ex (Var 'x'))))
+  pure (either (== "Un-novel") (const False) (evalDyn ew initState) && a && b)
+
+test3 :: Bool
+test3 = Right (sat (evalStatic' ez)) == (sat <$> evalDyn ez initState)
+
 main :: IO ()
 main = do
   putStrLn $ "test0 (static  vs DPL): " ++ show test0
   putStrLn $ "test1 (static' vs DPL): " ++ show test1
+  test2 >>= \b -> putStrLn ("test2 (novelty on ew): " ++ show b)
+  putStrLn $ "test3 (static' vs DPL, ez): " ++ show test3

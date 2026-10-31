@@ -22,7 +22,7 @@ common defaults
     TypeOperators
 
   build-depends:
-    base ^>=4.18.3.0,
+    base >=4.20 && <4.23,
     containers,
 
   default-language: Haskell2010
@@ -58,3 +58,15 @@ executable PLASafe
   ghc-options:
     -main-is
     PLASafe
+
+test-suite eedpl-tests
+  import: defaults
+  type: exitcode-stdio-1.0
+  hs-source-dirs:
+    test
+    src
+
+  main-is: EEDPLSpec.hs
+  other-modules: EEDPL
+  build-depends:
+    QuickCheck

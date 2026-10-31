@@ -1,0 +1,2 @@
+:set -package containers
+:set -fobject-code -O2 -outputdir .ghc-build

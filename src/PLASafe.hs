@@ -83,8 +83,7 @@ initState = State (const True)
 -- | Extend to a larger domain: @k@ new leading positions are unconstrained,
 --   so we simply drop them before applying the original function.
 extendBy :: Int -> (Stack -> Bool) -> Stack -> Bool
-extendBy 0 f = f
-extendBy k f = extendBy (k - 1) (f . tail)
+extendBy k f = f . drop k
 
 -- | Restrict to a smaller domain: existentially quantify over @k@ positions.
 projectBy :: Int -> (Stack -> Bool) -> Stack -> Bool
@@ -141,15 +140,15 @@ satSafe = sat . evalStatic
 --   extension of a 'Not'-subformula, supplied by its 'KnownNat ext' witness.
 eval :: Form req ext -> (Stack -> Bool) -> (Stack -> Bool)
 eval (Rel r vs)                f = \e -> f e && r (resolveV vs e)
-eval Ex                        f = f . tail
+eval Ex                        f = extendBy 1 f
 eval (Not (p :: Form req' ep)) f = let g = eval p f
                                     in \e -> f e && not (projectBy (natInt @ep) g e)
 eval (And p q)                 f = eval q (eval p f)
 
 -- | @req <= n@ is the compile-time domain-size check.
 --   No 'KnownNat n' needed: 'eval' never inspects the input domain.
-evalDPL :: (req <= n) => Form req ext -> State n -> State (n + ext)
-evalDPL form (State f) = State (eval form f)
+evalDyn :: (req <= n) => Form req ext -> State n -> State (n + ext)
+evalDyn form (State f) = State (eval form f)
 
 -- | Static content lives in a domain of size @ext@.
 evalStatic :: Form req ext -> State ext
@@ -181,12 +180,12 @@ ex = And s0 s1
 ey :: Form 2 2
 ey = And s1 s0
 
--- | Dekker theorem: evalDPL phi s = s `merge` evalStatic phi
+-- | Dekker theorem: evalDyn phi s = s `merge` evalStatic phi
 test :: Bool
-test = sat (initState `merge` evalStatic ex) == sat (evalDPL ex initState)
+test = sat (initState `merge` evalStatic ex) == sat (evalDyn ex initState)
 
 -- Compile-time rejection (uncomment to verify):
--- bad = evalDPL ey initState   -- No instance for (2 <= 0)
+-- bad = evalDyn ey initState   -- No instance for (2 <= 0)
 -- bad = satSafe ey
 
 main :: IO ()
