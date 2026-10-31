@@ -60,13 +60,20 @@ s @@ t
 (\\) :: (System s, Domain (Dom s), Eq (Dom s)) => s -> s -> s
 s \\ t = s @@ complement (reduceBy (dom t `diff` dom s) t)
 
--- | Lattice meet: widen both to the larger domain, intersect (Dekker's product).
+-- The lattice. For named variables (EDPL, EEDPL) these are Dekker's product
+-- and common ground, and the identification of referents across states is
+-- canonical. For positional systems (PLA's stacks, SEDPL's per-variable
+-- stacks) it is not: @extendBy@ and @reduceBy@ treat the smaller state's
+-- referents as the older ones, the convention @merge@ presupposes, and the
+-- laws hold relative to that alignment. Those systems don't use these.
+
+-- | Lattice meet: widen both to the larger domain, intersect.
 (/\) :: (System s, Domain (Dom s)) => s -> s -> s
 s /\ t =
   let d = dom s `widen` dom t
    in extendBy (d `diff` dom s) s `infoMeet` extendBy (d `diff` dom t) t
 
--- | Lattice join: narrow both to the smaller domain, union (Dekker's common ground).
+-- | Lattice join: narrow both to the smaller domain, union.
 (\/) :: (System s, Domain (Dom s)) => s -> s -> s
 s \/ t =
   let d = dom s `narrow` dom t
