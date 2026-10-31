@@ -94,15 +94,15 @@ delRef s v = reduceBy (S.singleton v) s
 
 -- | Disjoint union, raising on overlap: novelty, at domains (in @merge@) and
 -- at assignments (under negation, the talk's @ij@).
-class Novel a where
+class DisjointUnion a where
   (<+>) :: a -> a -> a
 
-instance Novel Domain where
+instance DisjointUnion Domain where
   d <+> e
     | S.disjoint d e = S.union d e
     | otherwise = error ("Novelty violation: " ++ show (S.toList (S.intersection d e)))
 
-instance Novel G where
+instance DisjointUnion G where
   i <+> j
     | M.disjoint i j = M.union i j
     | otherwise = error ("Novelty violation: " ++ show (M.keys (M.intersection i j)))
@@ -111,10 +111,10 @@ instance Novel G where
 extendBy :: Domain -> State -> State
 extendBy = flip (foldl' addRef)
 
--- | Restrict a state to a smaller domain. The witnesses overwrite, so this is
--- total.
+-- | Restrict a state to a smaller domain. @M.union@ is left-biased, so
+-- @flip M.union@ lets the witness overwrite: total.
 reduceBy :: Domain -> State -> State
-reduceBy = closeWith (\i j -> M.union j i)
+reduceBy = closeWith (flip M.union)
 
 -- | State merge, given disjoint domains. Analogous to PLA: the left state sees
 -- @e@ minus the right state's referents (cf. PLA's @drop n@).
@@ -241,7 +241,7 @@ evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @mer
 -- symmetric merge. Total, with no novelty or familiarity conditions, and
 -- Strawson equivalent to @evalDyn@ via @mergeSymm@.
 evalStatic'' :: Form -> State
-evalStatic'' (Rel r vs) = State domZero (\g -> all (`M.member` g) vs && r (resolve vs g)) -- guard first: @resolve@ is partial
+evalStatic'' (Rel r vs) = State domZero (\g -> all (`M.member` g) vs && r (resolve vs g)) -- the guard makes this total; @resolve@ alone is partial
 evalStatic'' (Ex v) = top (S.singleton v)
 evalStatic'' (Not p) = let s = evalStatic'' p in complement (reduceBy (dom s) s)
 evalStatic'' (And p q) = evalStatic'' p `mergeSymm` evalStatic'' q
