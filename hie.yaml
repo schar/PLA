@@ -1,10 +1,40 @@
+# Several files belong to more than one cabal component (EEDPL.hs to its
+# executable and the test suite, Shared.hs to all of them), which makes
+# `cabal repl <file>` ambiguous; so map files to components explicitly. The
+# longest matching path wins, so ./src catches EEDPL.hs and Shared.hs.
 cradle:
   multi:
     - path: "./ignore"
       config:
         cradle:
           none:
-    - path: "./"
+    - path: "./test"
       config:
         cradle:
           cabal:
+            component: "test:eedpl-tests"
+    - path: "./src/PLA.hs"
+      config:
+        cradle:
+          cabal:
+            component: "exe:PLA"
+    - path: "./src/PLASafe.hs"
+      config:
+        cradle:
+          cabal:
+            component: "exe:PLASafe"
+    - path: "./src/EDPL.hs"
+      config:
+        cradle:
+          cabal:
+            component: "exe:EDPL"
+    - path: "./src/SEDPL.hs"
+      config:
+        cradle:
+          cabal:
+            component: "exe:SEDPL"
+    - path: "./src"
+      config:
+        cradle:
+          cabal:
+            component: "exe:EEDPL"
