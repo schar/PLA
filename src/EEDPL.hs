@@ -2,12 +2,10 @@
 
 module EEDPL (module EEDPL, module Shared) where
 
-import Control.Exception (ErrorCall (..), evaluate, try)
 import Control.Monad (replicateM)
-import Data.Either (isRight)
-import Data.List (isPrefixOf, subsequences)
+import Data.Either (isLeft, isRight)
+import Data.List (subsequences)
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Shared
 
@@ -127,7 +125,9 @@ data Form
 -- | Resolve a sequence of variables at an assignment, failing as soon as the
 -- result is demanded if any is unvalued.
 resolve :: [Var] -> G -> [E]
-resolve vs g = fromMaybe (error ("Familiarity violation: " ++ show vs)) (traverse (`M.lookup` g) vs)
+resolve vs g = case traverse (`M.lookup` g) vs of
+  Just es -> es
+  Nothing -> error ("Familiarity violation: " ++ show vs)
 
 -- | Standard dynamic evaluation: update a state with a formula. Uses @Either@
 -- to facilitate @fvSem@ below.
@@ -247,10 +247,9 @@ test1 = Right (sat (evalStatic' ex)) == (sat <$> evalDyn ex initState)
 -- joined assignment.
 test2 :: IO Bool
 test2 = do
-  let raises f = either (\(ErrorCall m) -> "Novelty violation" `isPrefixOf` m) (const False) <$> try (evaluate (length (sat (evalStatic' f))))
-  a <- raises ew
-  b <- raises (And (Ex (Var 'x')) (Not (Ex (Var 'x'))))
-  pure (either (== "Un-novel") (const False) (evalDyn ew initState) && a && b)
+  a <- raises "Novelty violation" (sat (evalStatic' ew))
+  b <- raises "Novelty violation" (sat (evalStatic' (And (Ex (Var 'x')) (Not (Ex (Var 'x'))))))
+  pure (isLeft (evalDyn ew initState) && a && b)
 
 test3 :: Bool
 test3 = Right (sat (evalStatic' ez)) == (sat <$> evalDyn ez initState)
@@ -262,8 +261,8 @@ test4 :: IO Bool
 test4 = do
   let s = top (S.singleton (Var 'x'))
       f = And (Rel (const False) [Var 'x']) (Rel (const True) [Var 'y'])
-  r <- try (evaluate (length (sat (s `merge` evalStatic' f))))
-  pure (either (== "Un-familiar") (const False) (evalDyn f s) && either (\(ErrorCall m) -> "Familiarity violation" `isPrefixOf` m) (const False) r)
+  r <- raises "Familiarity violation" (sat (s `merge` evalStatic' f))
+  pure (isLeft (evalDyn f s) && r)
 
 main :: IO ()
 main = do

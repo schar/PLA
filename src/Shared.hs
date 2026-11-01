@@ -5,6 +5,9 @@
 -- operations below follow.
 module Shared where
 
+import Control.Exception (ErrorCall (..), evaluate, try)
+import Data.List (isPrefixOf)
+
 -- | Domains of referents.
 class Domain d where
   zero :: d
@@ -66,6 +69,10 @@ s \\ t = s @@ complement (reduceBy (dom t `diff` dom s) t)
 a &&! b = b `seq` (a && b)
 
 infixr 3 &&!
+
+-- | Does forcing the list raise an error whose message starts with @msg@?
+raises :: String -> [a] -> IO Bool
+raises msg xs = either (\(ErrorCall m) -> msg `isPrefixOf` m) (const False) <$> try (evaluate (length xs))
 
 -- The lattice. For named variables (EDPL, EEDPL) these are Dekker's product
 -- and common ground, and the identification of referents across states is

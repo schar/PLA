@@ -9,11 +9,10 @@ module SEDPL (module SEDPL, module Shared) where
 -- the referents introduced per variable, so the static meaning of a formula
 -- is a count and a predicate, as in the talk's ⟨⟨φ⟩⟩, with names.
 
-import Control.Exception (ErrorCall (..), evaluate, try)
 import Control.Monad (replicateM)
-import Data.List (isPrefixOf)
+import Data.Either (isLeft)
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (listToMaybe)
 import Shared
 
 type E = Int
@@ -64,7 +63,9 @@ pushAll = M.unionWith (++)
 -- | The variables' newest values, failing as soon as the result is demanded
 -- if any is unvalued.
 resolve :: [Var] -> G -> [E]
-resolve vs g = fromMaybe (error ("Un-familiar: " ++ show vs)) (traverse (\v -> M.lookup v g >>= listToMaybe) vs)
+resolve vs g = case traverse (\v -> M.lookup v g >>= listToMaybe) vs of
+  Just es -> es
+  Nothing -> error ("Un-familiar: " ++ show vs)
 
 -- States
 
@@ -173,8 +174,8 @@ unfamiliar :: IO Bool
 unfamiliar = do
   let s = top (M.singleton vx 1)
       f = And (Rel (const False) [vx]) (Rel (const True) [vy])
-  r <- try (evaluate (length (sat (s `merge` evalStatic' f))))
-  pure (either (== "Un-familiar") (const False) (evalDyn f s) && either (\(ErrorCall m) -> "Un-familiar" `isPrefixOf` m) (const False) r)
+  r <- raises "Un-familiar" (sat (s `merge` evalStatic' f))
+  pure (isLeft (evalDyn f s) && r)
 
 main :: IO ()
 main = do
