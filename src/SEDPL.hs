@@ -9,8 +9,11 @@ module SEDPL (module SEDPL, module Shared) where
 -- the referents introduced per variable, so the static meaning of a formula
 -- is a count and a predicate, as in the talk's ⟨⟨φ⟩⟩, with names.
 
+import Control.Exception (ErrorCall (..), evaluate, try)
 import Control.Monad (replicateM)
+import Data.List (isPrefixOf)
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe, listToMaybe)
 import Shared
 
 type E = Int
@@ -58,13 +61,10 @@ witnesses = traverse (\n -> replicateM n univ)
 pushAll :: G -> G -> G
 pushAll = M.unionWith (++)
 
--- | A variable's newest value.
+-- | The variables' newest values, failing as soon as the result is demanded
+-- if any is unvalued.
 resolve :: [Var] -> G -> [E]
-resolve vs g = map top1 vs
-  where
-    top1 v = case M.lookup v g of
-      Just (x : _) -> x
-      _ -> error ("Un-familiar: " ++ show v)
+resolve vs g = fromMaybe (error ("Un-familiar: " ++ show vs)) (traverse (\v -> M.lookup v g >>= listToMaybe) vs)
 
 -- States
 
@@ -86,7 +86,7 @@ instance System State where
 -- | Dekker's conjunction: the left state sees the input minus the right
 -- state's referents. Nothing can clash, so nothing is checked.
 merge :: State -> State -> State
-merge (State d s) (State d' t) = State (d `plus` d') (\g -> s (popBy d' g) && t g)
+merge (State d s) (State d' t) = State (d `plus` d') (\g -> s (popBy d' g) &&! t g)
 
 -- | Zeevat's symmetric merge.
 mergeSymm :: State -> State -> State
@@ -116,7 +116,7 @@ evalDyn (And p q) s = evalDyn p s >>= evalDyn q
 -- | Static content, following the talk's ⟨⟨φ⟩⟩: a count and a predicate.
 -- @evalDyn φ s == s `merge` evalStatic' φ@ when defined (tested below).
 evalStatic' :: Form -> State
-evalStatic' (Rel r vs) = State zero (r . resolve vs) -- familiarity from @resolve@
+evalStatic' (Rel r vs) = State zero (\g -> r $! resolve vs g) -- familiarity from @resolve@
 evalStatic' (Ex v) = top (M.singleton v 1)
 evalStatic' (Not p) = let s = evalStatic' p in complement (reduceBy (dom s) s)
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q
@@ -166,8 +166,19 @@ sh = And (And (Ex vx) (Rel big [vx])) (And (Ex vx) (Rel small [vx]))
 agree :: Form -> Bool
 agree f = Right (sat (evalStatic' f)) == (sat <$> evalDyn f initState)
 
+-- | From a state over @x@, @evalDyn@ rejects @Fx ∧ Gy@ as un-familiar, and
+-- @merge@ with @evalStatic'@ raises on it, though @Fx@ is false throughout and
+-- nothing reads @y@.
+unfamiliar :: IO Bool
+unfamiliar = do
+  let s = top (M.singleton vx 1)
+      f = And (Rel (const False) [vx]) (Rel (const True) [vy])
+  r <- try (evaluate (length (sat (s `merge` evalStatic' f))))
+  pure (either (== "Un-familiar") (const False) (evalDyn f s) && either (\(ErrorCall m) -> "Un-familiar" `isPrefixOf` m) (const False) r)
+
 main :: IO ()
 main = do
   putStrLn $ "static' vs dynamic on ex, ez, ew, sh: " ++ show (map agree [ex, ez, ew, sh])
+  unfamiliar >>= \b -> putStrLn ("familiarity, Fx false: " ++ show b)
   putStrLn $ "ew (un-novel in EDPL): " ++ show (fmap (length . sat) (evalDyn ew initState)) ++ " referent systems, y = " ++ show [g M.! vy | g <- take 1 (sat (evalStatic' ew))]
   putStrLn $ "sh: " ++ show (length (sat (evalStatic' sh))) ++ " referent systems, e.g. " ++ show [M.toList g | g <- take 1 (sat (evalStatic' sh))]

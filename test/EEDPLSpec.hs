@@ -386,6 +386,11 @@ prop_test2 = ioProperty test2
 prop_test3 :: Property
 prop_test3 = property test3
 
+-- | test4 from the module: a familiarity failure in a right conjunct, next to
+-- a left conjunct that is false throughout.
+prop_test4 :: Property
+prop_test4 = ioProperty test4
+
 -- Run all tests
 
 check :: String -> Int -> Property -> IO Bool
@@ -422,6 +427,7 @@ main = do
     , check "test1 (static' vs DPL)"                   100 prop_test1
     , check "test2 (novelty on ew)"                      1 prop_test2
     , check "test3 (static' vs DPL, ez)"               100 prop_test3
+    , check "test4 (familiarity, Fx false)"              1 prop_test4
     ]
   if and results
     then putStrLn "\n=== All tests passed ==="

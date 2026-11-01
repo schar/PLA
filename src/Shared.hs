@@ -60,6 +60,13 @@ s @@ t
 (\\) :: (System s, Domain (Dom s), Eq (Dom s)) => s -> s -> s
 s \\ t = s @@ complement (reduceBy (dom t `diff` dom s) t)
 
+-- | Conjunction that evaluates both sides, so a failure on either side fires
+-- even where the other is false.
+(&&!) :: Bool -> Bool -> Bool
+a &&! b = b `seq` (a && b)
+
+infixr 3 &&!
+
 -- The lattice. For named variables (EDPL, EEDPL) these are Dekker's product
 -- and common ground, and the identification of referents across states is
 -- canonical. For positional systems (PLA's stacks, SEDPL's per-variable

@@ -63,7 +63,9 @@ data Form
   | Not Form
   | And Form Form
 
--- | Resolve a sequence of variables at a stack.
+-- | Resolve a sequence of variables at a stack. An out-of-range index is a
+-- runtime error that a false conjunct can hide, in @evalDyn@ and @evalStatic@
+-- alike; @PLASafe@ rules such formulas out by type.
 resolve :: [Pro] -> Stack -> [E]
 resolve vs e = map (\(Var i) -> e !! i) vs
 

@@ -7,6 +7,7 @@ import Control.Monad (replicateM)
 import Data.Either (isRight)
 import Data.List (isPrefixOf, subsequences)
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Shared
 
@@ -85,7 +86,7 @@ instance DisjointUnion G where
 -- | State merge, given disjoint domains. Analogous to PLA: the left state sees
 -- @e@ minus the right state's referents (cf. PLA's @drop n@).
 merge :: State -> State -> State
-merge (State d s) (State d' t) = State (d <+> d') (\e -> s (M.withoutKeys e d') && t e)
+merge (State d s) (State d' t) = State (d <+> d') (\e -> s (M.withoutKeys e d') &&! t e)
 
 -- | Symmetric / Zeevat merge
 mergeSymm :: State -> State -> State
@@ -123,9 +124,10 @@ data Form
   | Not Form
   | And Form Form
 
--- | Resolve a sequence of variables at an assignment.
+-- | Resolve a sequence of variables at an assignment, failing as soon as the
+-- result is demanded if any is unvalued.
 resolve :: [Var] -> G -> [E]
-resolve vs g = map (g M.!) vs
+resolve vs g = fromMaybe (error ("Familiarity violation: " ++ show vs)) (traverse (`M.lookup` g) vs)
 
 -- | Standard dynamic evaluation: update a state with a formula. Uses @Either@
 -- to facilitate @fvSem@ below.
@@ -161,7 +163,7 @@ evalStatic (And p q) = evalStatic p /\ evalStatic q
 -- @resolve@; novelty that of @<+>@, at domains in @merge@ and at assignments
 -- under negation.
 evalStatic' :: Form -> State
-evalStatic' (Rel r vs) = State zero (r . resolve vs)     -- familiarity from @resolve@
+evalStatic' (Rel r vs) = State zero (\g -> r $! resolve vs g) -- familiarity from @resolve@
 evalStatic' (Ex v) = top (S.singleton v)
 evalStatic' (Not p) = let s = evalStatic' p in complement (closeWith (<+>) (dom s) s) -- novelty from @<+>@
 evalStatic' (And p q) = evalStatic' p `merge` evalStatic' q -- novelty from @merge@
@@ -253,9 +255,20 @@ test2 = do
 test3 :: Bool
 test3 = Right (sat (evalStatic' ez)) == (sat <$> evalDyn ez initState)
 
+-- | From a state over @x@, @evalDyn@ rejects @Fx ∧ Gy@ as un-familiar, and
+-- @merge@ with @evalStatic'@ raises on it, though @Fx@ is false throughout and
+-- nothing reads @y@.
+test4 :: IO Bool
+test4 = do
+  let s = top (S.singleton (Var 'x'))
+      f = And (Rel (const False) [Var 'x']) (Rel (const True) [Var 'y'])
+  r <- try (evaluate (length (sat (s `merge` evalStatic' f))))
+  pure (either (== "Un-familiar") (const False) (evalDyn f s) && either (\(ErrorCall m) -> "Familiarity violation" `isPrefixOf` m) (const False) r)
+
 main :: IO ()
 main = do
   putStrLn $ "test0 (static  vs DPL): " ++ show test0
   putStrLn $ "test1 (static' vs DPL): " ++ show test1
   test2 >>= \b -> putStrLn ("test2 (novelty on ew): " ++ show b)
   putStrLn $ "test3 (static' vs DPL, ez): " ++ show test3
+  test4 >>= \b -> putStrLn ("test4 (familiarity, Fx false): " ++ show b)
